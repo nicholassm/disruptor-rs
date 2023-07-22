@@ -31,7 +31,7 @@ There are multiple other Rust projects that mimic the LMAX Disruptor library:
 2. [Disrustor](https://github.com/sklose/disrustor)
 
 A key feature that this library will support (soon!) is multiple publishers that
-neither of the above libraries support (at the time of writing this).
+neither of the above libraries support (at the time of writing).
 
 # Roadmap
 

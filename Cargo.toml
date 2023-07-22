@@ -1,0 +1,15 @@
+[package]
+name          = "disruptor"
+version       = "0.1.0"
+edition       = "2021"
+description   = "Low latency inter-thread communication via a ringbuffer (inspired by LMAX Disruptor)."
+license       = "MIT"
+documentation = "https://docs.rs/disruptor"
+repository    = "https://github.com/nicholassm/disruptor-rs"
+categories    = ["data-structures", "concurrency"]
+keywords      = ["disruptor", "ringbuffer"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+crossbeam-utils = "0.8"

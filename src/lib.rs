@@ -6,7 +6,7 @@
 //! # Examples
 //! ```
 //! use disruptor::Builder;
-//! use disruptor::wait_strategies::BusySpin;
+//! use disruptor::BusySpin;
 //!
 //! // The data entity on the ring buffer.
 //! struct Event {
@@ -36,8 +36,10 @@
 //! // the Publisher instance goes out of scope and the publisher and Disruptor are dropped.
 //! ```
 
+pub use wait_strategies::BusySpin;
+
 pub mod wait_strategies;
-mod producer;
+pub mod producer;
 mod consumer;
 
 use std::cell::UnsafeCell;
@@ -109,7 +111,7 @@ impl<E, P, W> Builder<E, P, W>
 	///
 	/// // Create a Disruptor by using a `disruptor::Builder`, In this example, the ring buffer has
 	/// // size 8 and the `BusySpin` wait strategy. Finally, the Disruptor is built by specifying that
-	/// // only a single thread will publish into the Disruptor (via a `Publisher` handle).
+	/// // only a single thread will publish into the Disruptor (via a `Producer` handle).
 	/// let mut publisher = disruptor::Builder::new(8, factory, processor, BusySpin);
 	/// ```
 	pub fn new<F>(size: usize, mut event_factory: F, processor: P, wait_strategy: W) -> Builder<E, P, W>
@@ -137,7 +139,7 @@ impl<E, P, W> Builder<E, P, W>
 		}
 	}
 
-	/// Creates the Disruptor and returns a [Producer] used for publishing into the Disruptor (single
+	/// Creates the Disruptor and returns a [Producer<E>] used for publishing into the Disruptor (single
 	/// thread).
 	pub fn create_with_single_producer(self) -> Producer<E> {
 		let producer_barrier = SingleProducerBarrier::new();
@@ -207,7 +209,7 @@ impl<E, P: ProducerBarrier> Disruptor<E, P> {
 #[cfg(test)]
 mod tests {
 	use std::thread;
-	use crate::wait_strategies::BusySpin;
+	use crate::BusySpin;
 	use std::sync::mpsc;
 	use super::*;
 

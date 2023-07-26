@@ -1,3 +1,9 @@
+//! Module with different strategies for waiting for an event to be published.
+//!
+//! The lowest latency possible is the [BusySpin] strategy.
+//!
+//! To "waist" less CPU time and power, use one of the other strategies which has higher latency.
+
 pub trait WaitStrategy: Copy + Send {
 	/// The wait strategy will wait for the sequence id being available.
 	fn wait_for(&self, sequence: i64);

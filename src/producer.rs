@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use crate::consumer::Receiver;
 use crate::Disruptor;
 
-pub trait ProducerBarrier {
+pub(crate) trait ProducerBarrier {
 	fn publish(&self, sequence: i64);
 	fn is_published(&self, sequence: i64) -> bool;
 }
@@ -56,6 +56,7 @@ impl<E> Producer<E> {
 		unsafe { &*self.disruptor }
 	}
 
+	/// Publish an Event into the Disruptor.
 	#[inline]
 	pub fn publish<F: FnOnce(&mut E) -> ()>(&mut self, update: F) {
 		let disruptor = self.disruptor();
@@ -90,6 +91,7 @@ impl<E> Producer<E> {
 	}
 }
 
+/// Stops the processor thread and drops the Disruptor, the processor thread and the [Producer].
 impl<E> Drop for Producer<E> {
 	fn drop(&mut self) {
 		self.disruptor().shut_down();

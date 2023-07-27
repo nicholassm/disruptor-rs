@@ -1,6 +1,7 @@
 # Disruptor
 
 This library is a low latency, inter-thread communication library written in Rust.
+
 It's heavily inspired by the brilliant
 [Disruptor library from LMAX](https://github.com/LMAX-Exchange/disruptor).
 

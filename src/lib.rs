@@ -10,7 +10,7 @@
 //!
 //! // The data entity on the ring buffer.
 //! struct Event {
-//! 	price: f64
+//!     price: f64
 //! }
 //!
 //! // Create a factory for populating the ring buffer with events.
@@ -19,7 +19,7 @@
 //! // Create a closure for processing events. A thread, controlled by the disruptor, will run this
 //! // processor each time an event is published.
 //! let processor = |e: &Event| {
-//! 	// Process e.
+//!     // Process e.
 //! };
 //!
 //! // Create a Disruptor by using a `disruptor::Builder`, In this example, the ring buffer has
@@ -28,9 +28,9 @@
 //! let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
 //! // Publish into the Disruptor.
 //! for i in 0..10 {
-//! 	producer.publish(|e| {
-//! 		e.price = i as f64;
-//! 	});
+//!     producer.publish(|e| {
+//!         e.price = i as f64;
+//!     });
 //! }
 //! // At this point, the processor thread processes all published events and then stops as
 //! // the Producer instance goes out of scope and the Producer and Disruptor are dropped.
@@ -73,13 +73,13 @@ pub struct Builder<E, P, W> {
 }
 
 fn is_pow_of_2(num: usize) -> bool {
-	return num != 0 && (num & (num - 1) == 0)
+	num != 0 && (num & (num - 1) == 0)
 }
 
-impl<E, P, W> Builder<E, P, W>
-	where E: 'static,
-		  P: Send + FnMut(&E) -> () + 'static,
-		  W: WaitStrategy + 'static {
+impl<E, P, W> Builder<E, P, W> where
+		E: 'static,
+		P: Send + FnMut(&E) + 'static,
+		W: WaitStrategy + 'static {
 
 	/// Creates a Builder for a Disruptor.
 	///
@@ -101,7 +101,7 @@ impl<E, P, W> Builder<E, P, W>
 	/// use disruptor::wait_strategies::BusySpin;
 	///
 	/// struct Event {
-	/// 	price: f64
+	///     price: f64
 	/// }
 	///
 	/// // Create a factory for populating the ring buffer with events.
@@ -110,7 +110,7 @@ impl<E, P, W> Builder<E, P, W>
 	/// // Create a closure for processing events. A thread, controlled by the disruptor, will run this
 	/// // processor each time an event is published.
 	/// let processor = |e: &Event| {
-	/// 	// Process e.
+	///     // Process e.
 	/// };
 	///
 	/// // Create a Disruptor by using a `disruptor::Builder`, In this example, the ring buffer has
@@ -118,8 +118,8 @@ impl<E, P, W> Builder<E, P, W>
 	/// // only a single thread will publish into the Disruptor (via a `Producer` handle).
 	/// let mut publisher = disruptor::Builder::new(8, factory, processor, BusySpin);
 	/// ```
-	pub fn new<F>(size: usize, mut event_factory: F, processor: P, wait_strategy: W) -> Builder<E, P, W>
-		where F: FnMut() -> E
+	pub fn new<F>(size: usize, mut event_factory: F, processor: P, wait_strategy: W) -> Builder<E, P, W> where
+		F: FnMut() -> E
 	{
 		if !is_pow_of_2(size) { panic!("Size must be power of 2.") }
 

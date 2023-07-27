@@ -10,11 +10,11 @@ pub(crate) struct Receiver {
 }
 
 impl Receiver {
-	pub(crate) fn new<E, F, W, P>(wrapper: DisruptorWrapper<E, P>, mut handle: F, wait_strategy: W) -> Receiver
-		where F: Send + FnMut(&E) -> () + 'static,
-			  E: 'static,
-			  W: WaitStrategy + Send + 'static,
-			  P: ProducerBarrier + 'static
+	pub(crate) fn new<E, F, W, P>(wrapper: DisruptorWrapper<E, P>, mut handle: F, wait_strategy: W) -> Receiver where
+		F: Send + FnMut(&E) + 'static,
+		E: 'static,
+		W: WaitStrategy + Send + 'static,
+		P: ProducerBarrier + 'static
 	{
 		let join_handle: JoinHandle<()> = thread::spawn(move || {
 			let disruptor = wrapper.unwrap();
@@ -43,6 +43,6 @@ impl Receiver {
 	}
 
 	pub(crate) fn join(&mut self) {
-		self.join_handle.take().map(|h| { h.join().expect("Receiver should be stopped.")});
+		if let Some(h) = self.join_handle.take() { h.join().expect("Receiver should be stopped.") }
 	}
 }

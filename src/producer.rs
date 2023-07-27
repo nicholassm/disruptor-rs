@@ -81,7 +81,7 @@ impl<E> Producer<E> {
 	///#
 	/// // The data entity on the ring buffer.
 	/// struct Event {
-	/// 	price: f64
+	///     price: f64
 	/// }
 	///# fn main() -> Result<(), RingBufferFull> {
 	/// let factory = || { Event { price: 0.0 }};
@@ -94,8 +94,7 @@ impl<E> Producer<E> {
 	///
 	/// See also [`Self::publish`].
 	#[inline]
-	pub fn try_publish<F>(&mut self, update: F) -> Result<i64, RingBufferFull>
-		where F: FnOnce(&mut E) -> ()
+	pub fn try_publish<F>(&mut self, update: F) -> Result<i64, RingBufferFull> where F: FnOnce(&mut E)
 	{
 		let sequence  = self.next_sequence()?;
 		self.apply_update(sequence, update);
@@ -114,7 +113,7 @@ impl<E> Producer<E> {
 	///#
 	/// // The data entity on the ring buffer.
 	/// struct Event {
-	/// 	price: f64
+	///     price: f64
 	/// }
 	///# let factory      = || { Event { price: 0.0 }};
 	///# let processor    = |e: &Event| {};
@@ -124,9 +123,7 @@ impl<E> Producer<E> {
 	///
 	/// See also [`Self::try_publish`].
 	#[inline]
-	pub fn publish<F>(&mut self, update: F)
-		where F: FnOnce(&mut E) -> ()
-	{
+	pub fn publish<F>(&mut self, update: F) where F: FnOnce(&mut E) {
 		let sequence =
 			if let Ok(sequence) = self.next_sequence() { // Optimize for the common case.
 				sequence
@@ -170,7 +167,7 @@ impl<E> Producer<E> {
 
 	/// Precondition: `sequence` is available for publication.
 	#[inline]
-	fn apply_update<F>(&mut self, sequence: i64, update: F) where F: FnOnce(&mut E) -> () {
+	fn apply_update<F>(&mut self, sequence: i64, update: F) where F: FnOnce(&mut E) {
 		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
 		// can now update the data.
 		let disruptor = self.disruptor(); // Re-borrow as mutated above.

@@ -18,8 +18,10 @@
 //!
 //! // Create a closure for processing events. A thread, controlled by the disruptor, will run this
 //! // processor each time an event is published.
-//! let processor = |e: &Event| {
+//! let processor = |e: &Event, sequence: i64, end_of_batch: bool| {
 //!     // Process e.
+//!     // If end_of_batch is false, you can batch up events until it's invoked with
+//!     // end_of_batch=true.
 //! };
 //!
 //! // Create a Disruptor by using a `disruptor::Builder`, In this example, the ring buffer has
@@ -78,7 +80,7 @@ fn is_pow_of_2(num: usize) -> bool {
 
 impl<E, P, W> Builder<E, P, W> where
 		E: 'static,
-		P: Send + FnMut(&E) + 'static,
+		P: Send + FnMut(&E, i64, bool) + 'static,
 		W: WaitStrategy + 'static {
 
 	/// Creates a Builder for a Disruptor.
@@ -107,9 +109,9 @@ impl<E, P, W> Builder<E, P, W> where
 	/// // Create a factory for populating the ring buffer with events.
 	/// let factory = || { Event { price: 0.0 }};
 	///
-	/// // Create a closure for processing events. A thread, controlled by the disruptor, will run this
-	/// // processor each time an event is published.
-	/// let processor = |e: &Event| {
+	/// // Create a closure for processing events. A thread, controlled by the disruptor, will run
+	/// // this processor each time an event is published.
+	/// let processor = |e: &Event, sequence: i64, end_of_batch: bool| {
 	///     // Process e.
 	/// };
 	///
@@ -194,8 +196,8 @@ impl<E, P: ProducerBarrier> Disruptor<E, P> {
 	}
 
 	#[inline]
-	fn is_published(&self, sequence: i64) -> bool {
-		self.producer_barrier.is_published(sequence)
+	fn get_highest_published(&self) -> i64 {
+		self.producer_barrier.get_highest_available()
 	}
 
 	#[inline]
@@ -221,7 +223,7 @@ mod tests {
 	#[should_panic(expected = "Size must be power of 2.")]
 	fn test_size_not_a_factor_of_2() {
 		std::panic::set_hook(Box::new(|_| {})); // To avoid backtrace in console.
-		Builder::new(3, || { 0 }, |_i| {}, BusySpin);
+		Builder::new(3, || { 0 }, |_i, _, _| {}, BusySpin);
 	}
 
 	#[derive(Debug)]
@@ -240,7 +242,7 @@ mod tests {
 	fn test_single_producer() {
 		let factory     = || { Event { price: 0, size: 0, data: Data { data: "".to_owned() } }};
 		let (s, r)      = mpsc::channel();
-		let processor   = move |e: &Event| {
+		let processor   = move |e: &Event, _, _| {
 			s.send(e.price*e.size).expect("Should be able to send.");
 		};
 
@@ -264,13 +266,13 @@ mod tests {
 	fn test_pipeline_of_two_disruptors() {
 		let factory   = || { Event { price: 0, size: 0, data: Data { data: "".to_owned() } } };
 		let (s, r)    = mpsc::channel();
-		let processor = move |e: &Event| {
+		let processor = move |e: &Event, _, _| {
 			s.send(e.price*e.size).expect("Should be able to send.");
 		};
 
 		// Last Disruptor.
 		let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
-		let processor = move |e: &Event| {
+		let processor = move |e: &Event, _, _| {
 			producer.publish(|e2| {
 				e2.price    = e.price*2;
 				e2.size     = e.size*2;

@@ -7,7 +7,7 @@ use crate::Disruptor;
 
 pub(crate) trait ProducerBarrier {
 	fn publish(&self, sequence: i64);
-	fn is_published(&self, sequence: i64) -> bool;
+	fn get_highest_available(&self) -> i64;
 }
 
 pub(crate) struct SingleProducerBarrier {
@@ -28,8 +28,8 @@ impl ProducerBarrier for SingleProducerBarrier {
 	}
 
 	#[inline]
-	fn is_published(&self, sequence: i64) -> bool {
-		self.cursor.load(Ordering::Acquire) >= sequence
+	fn get_highest_available(&self) -> i64 {
+		self.cursor.load(Ordering::Acquire)
 	}
 }
 
@@ -85,7 +85,7 @@ impl<E> Producer<E> {
 	/// }
 	///# fn main() -> Result<(), RingBufferFull> {
 	/// let factory = || { Event { price: 0.0 }};
-	///# let processor = |e: &Event| {};
+	///# let processor = |e: &Event, _, _| {};
 	///# let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
 	/// producer.try_publish(|e| { e.price = 42.0; })?;
 	///# Ok(())
@@ -116,7 +116,7 @@ impl<E> Producer<E> {
 	///     price: f64
 	/// }
 	///# let factory      = || { Event { price: 0.0 }};
-	///# let processor    = |e: &Event| {};
+	///# let processor    = |e: &Event, _, _| {};
 	///# let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
 	/// producer.publish(|e| { e.price = 42.0; });
 	/// ```

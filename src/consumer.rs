@@ -10,32 +10,36 @@ pub(crate) struct Receiver {
 }
 
 impl Receiver {
-	pub(crate) fn new<E, F, W, P>(wrapper: DisruptorWrapper<E, P>, mut handle: F, wait_strategy: W) -> Receiver where
-		F: Send + FnMut(&E) + 'static,
+	pub(crate) fn new<E, F, W, P>(wrapper: DisruptorWrapper<E, P>, mut process: F, wait_strategy: W) -> Receiver where
+		F: Send + FnMut(&E, i64, bool) + 'static,
 		E: 'static,
 		W: WaitStrategy + Send + 'static,
 		P: ProducerBarrier + 'static
 	{
 		let join_handle: JoinHandle<()> = thread::spawn(move || {
-			let disruptor = wrapper.unwrap();
+			let disruptor    = wrapper.unwrap();
+			let mut sequence = 0i64;
 			loop {
-				let sequence = disruptor.consumer_barrier.load(Ordering::Relaxed);
+				let mut available = disruptor.get_highest_published();
 
-				while !disruptor.is_published(sequence) {
+				while available < sequence {
 					if disruptor.is_shutting_down() {
 						// Recheck that no new published events are present.
-						if !disruptor.is_published(sequence) { return }
+						if disruptor.get_highest_published() < sequence { return }
 					}
 					wait_strategy.wait_for(sequence);
+					available = disruptor.get_highest_published();
 				}
-				// SAFETY: Now, we have exclusive access to the element.
+				// SAFETY: Now, we have exclusive access to the element at `sequence`.
 				let mut_element = disruptor.get(sequence);
 				unsafe {
-					let element: &E = &*mut_element;
-					handle(element);
+					let element: &E  = &*mut_element;
+					let end_of_batch = available == sequence;
+					process(element, sequence, end_of_batch);
 				}
 				// Signal to producers that we're done processing `sequence`.
-				disruptor.consumer_barrier.store(sequence + 1, Ordering::Release);
+				sequence += 1;
+				disruptor.consumer_barrier.store(sequence, Ordering::Release);
 			}
 		});
 

@@ -102,30 +102,6 @@ impl<E> Producer<E> {
 		Ok(sequence)
 	}
 
-	fn next_sequence(&mut self) -> Result<i64, RingBufferFull> {
-		let disruptor        = self.disruptor();
-		// Only one producer can publish so we can load it once.
-		let last_produce_seq = disruptor.producer_barrier.cursor.load(Ordering::Relaxed);
-		let sequence         = last_produce_seq + 1;
-
-		if self.available_publisher_sequence < sequence {
-			// We have to check where the consumer is in case we're about to
-			// publish into the slot currently being read by the consumer.
-			// (Consumer is an entire ring buffer behind the publisher).
-			let wrap_point        = disruptor.wrap_point(sequence);
-			let consumer_sequence = disruptor.consumer_barrier.load(Ordering::Acquire);
-			if consumer_sequence == wrap_point {
-				return Err(RingBufferFull);
-			}
-
-			// We can now continue until we get right behind the consumer's current
-			// position without checking where it actually is.
-			self.available_publisher_sequence = consumer_sequence + disruptor.ring_buffer_size - 1;
-		}
-
-		Ok(sequence)
-	}
-
 	/// Publish an Event into the Disruptor.
 	///
 	/// Blocks until there is an available slot in case the ring buffer is full.
@@ -165,6 +141,31 @@ impl<E> Producer<E> {
 			};
 
 		self.apply_update(sequence, update);
+	}
+
+	#[inline]
+	fn next_sequence(&mut self) -> Result<i64, RingBufferFull> {
+		let disruptor        = self.disruptor();
+		// Only one producer can publish so we can load it once.
+		let last_produce_seq = disruptor.producer_barrier.cursor.load(Ordering::Relaxed);
+		let sequence         = last_produce_seq + 1;
+
+		if self.available_publisher_sequence < sequence {
+			// We have to check where the consumer is in case we're about to
+			// publish into the slot currently being read by the consumer.
+			// (Consumer is an entire ring buffer behind the publisher).
+			let wrap_point        = disruptor.wrap_point(sequence);
+			let consumer_sequence = disruptor.consumer_barrier.load(Ordering::Acquire);
+			if consumer_sequence == wrap_point {
+				return Err(RingBufferFull);
+			}
+
+			// We can now continue until we get right behind the consumer's current
+			// position without checking where it actually is.
+			self.available_publisher_sequence = consumer_sequence + disruptor.ring_buffer_size - 1;
+		}
+
+		Ok(sequence)
 	}
 
 	/// Precondition: `sequence` is available for publication.

@@ -119,14 +119,14 @@ impl<E, P, W> Builder<E, P, W>
 	{
 		if !is_pow_of_2(size) { panic!("Size must be power of 2.") }
 
-		let index_mask = (size - 1) as i64;
 		let ring_buffer: Box<[Slot<E>]> = (0..size)
 			.map(|_i| {
 				Slot { event: UnsafeCell::new(event_factory()) }
 			}).collect();
+		let index_mask       = (size - 1) as i64;
 		let ring_buffer_size = size as i64;
 		let consumer_barrier = CachePadded::new(AtomicI64::new(0));
-		let shutting_down = AtomicBool::new(false);
+		let shutting_down    = AtomicBool::new(false);
 
 		Builder {
 			ring_buffer,
@@ -156,7 +156,7 @@ impl<E, P, W> Builder<E, P, W>
 			)
 		);
 
-		let wrapper = DisruptorWrapper { disruptor };
+		let wrapper  = DisruptorWrapper { disruptor };
 		let receiver = Receiver::new(wrapper, self.processor, self.wait_strategy);
 		Producer::new(disruptor, receiver, self.ring_buffer_size - 1)
 	}

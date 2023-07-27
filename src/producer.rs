@@ -39,6 +39,8 @@ pub struct Producer<E> {
 
 unsafe impl<E: Send> Send for Producer<E> {}
 
+pub struct RingBufferFull;
+
 impl<E> Producer<E> {
 	pub(crate) fn new(
 		disruptor: *mut Disruptor<E, SingleProducerBarrier>,
@@ -57,27 +59,100 @@ impl<E> Producer<E> {
 	}
 
 	/// Publish an Event into the Disruptor.
+	///
+	/// Returns a `Result` with the published sequence number or a [RingBufferFull] in case the
+	/// ring buffer is full.
+	///
+	/// # Examples
+	///
+	/// ```
+	///# use disruptor::Builder;
+	///# use disruptor::BusySpin;
+	///#
+	/// // The data entity on the ring buffer.
+	/// struct Event {
+	/// 	price: f64
+	/// }
+	///# let factory = || { Event { price: 0.0 }};
+	///# let processor = |e: &Event| {};
+	///# let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
+	/// producer.try_publish(|e| { e.price = 42.0; })?;
+	/// ```
+	///
+	/// See also [Self::publish].
 	#[inline]
-	pub fn publish<F: FnOnce(&mut E) -> ()>(&mut self, update: F) {
+	pub fn try_publish<F>(&mut self, update: F) -> Result<i64, RingBufferFull>
+		where F: FnOnce(&mut E) -> ()
+	{
+		let sequence  = self.next_sequence()?;
+		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
+		// can now update the data.
 		let disruptor = self.disruptor();
+		unsafe {
+			let element = &mut *disruptor.get(sequence);
+			update(element);
+		}
+		// Publish by publishing `sequence`.
+		disruptor.producer_barrier.publish(sequence);
+
+		Ok(sequence)
+	}
+
+	fn next_sequence(&mut self) -> Result<i64, RingBufferFull> {
+		let disruptor        = self.disruptor();
 		// Only one producer can publish so we can load it once.
 		let last_produce_seq = disruptor.producer_barrier.cursor.load(Ordering::Relaxed);
-		let sequence = last_produce_seq + 1;
+		let sequence         = last_produce_seq + 1;
 
 		if self.available_publisher_sequence < sequence {
-			// We have to check where the consumer is and potential wait for it if we're about to
+			// We have to check where the consumer is in case we're about to
 			// publish into the slot currently being read by the consumer.
 			// (Consumer is an entire ring buffer behind the publisher).
-			let wrap_point            = disruptor.wrap_point(sequence);
-			let mut consumer_sequence = disruptor.consumer_barrier.load(Ordering::Acquire);
-			while consumer_sequence <= wrap_point {
-				// TODO: Removed wait strategy here. This should return Result<i64, FullRingBuffer> instead.
-				consumer_sequence = disruptor.consumer_barrier.load(Ordering::Acquire);
+			let wrap_point        = disruptor.wrap_point(sequence);
+			let consumer_sequence = disruptor.consumer_barrier.load(Ordering::Acquire);
+			if consumer_sequence == wrap_point {
+				return Err(RingBufferFull);
 			}
-			// We can now continue a full round until we get right behind the consumer's current
+
+			// We can now continue until we get right behind the consumer's current
 			// position without checking where it actually is.
 			self.available_publisher_sequence = consumer_sequence + disruptor.ring_buffer_size - 1;
 		}
+
+		Ok(sequence)
+	}
+
+	/// Publish an Event into the Disruptor.
+	///
+	/// Blocks until there is an available slot in case the ring buffer is full.
+	///
+	/// # Examples
+	///
+	/// ```
+	///# use disruptor::Builder;
+	///# use disruptor::BusySpin;
+	///#
+	/// // The data entity on the ring buffer.
+	/// struct Event {
+	/// 	price: f64
+	/// }
+	///# let factory      = || { Event { price: 0.0 }};
+	///# let processor    = |e: &Event| {};
+	///# let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
+	/// producer.publish(|e| { e.price = 42.0; });
+	/// ```
+	///
+	/// See also [Self::try_publish].
+	#[inline]
+	pub fn publish<F>(&mut self, update: F)
+		where F: FnOnce(&mut E) -> ()
+	{
+		let sequence = loop {
+			break match self.next_sequence() {
+				Ok(sequence)        => sequence,
+				Err(RingBufferFull) => continue
+			};
+		};
 
 		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
 		// can now update the data.

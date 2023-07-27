@@ -24,7 +24,7 @@
 //!
 //! // Create a Disruptor by using a `disruptor::Builder`, In this example, the ring buffer has
 //! // size 8 and the `BusySpin` wait strategy. Finally, the Disruptor is built by specifying that
-//! // only a single thread will publish into the Disruptor (via a `Publisher` handle).
+//! // only a single thread will publish into the Disruptor (via a `Producer` handle).
 //! let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
 //! // Publish into the Disruptor.
 //! for i in 0..10 {
@@ -33,8 +33,11 @@
 //! 	});
 //! }
 //! // At this point, the processor thread processes all published events and then stops as
-//! // the Publisher instance goes out of scope and the publisher and Disruptor are dropped.
+//! // the Producer instance goes out of scope and the Producer and Disruptor are dropped.
 //! ```
+
+#![deny(rustdoc::broken_intra_doc_links)]
+#![warn(missing_docs)]
 
 pub use wait_strategies::BusySpin;
 
@@ -58,6 +61,7 @@ pub(crate) struct Disruptor<E, P: ProducerBarrier> {
 	ring_buffer:      Box<[Slot<E>]>
 }
 
+/// Builder used for configuring and constructing a Disruptor.
 pub struct Builder<E, P, W> {
 	ring_buffer:      Box<[Slot<E>]>,
 	consumer_barrier: CachePadded<AtomicI64>,
@@ -84,7 +88,7 @@ impl<E, P, W> Builder<E, P, W>
 	/// The `event_factory` is used for populating the initial values in the ring buffer and
 	/// the `processor`closure will be invoked on each available event `E`.
 	/// The `wait_strategy` determines what to do when there are no available events yet.
-	/// (See module [wait_strategies] for the available options.)
+	/// (See module [`wait_strategies`] for the available options.)
 	///
 	/// # Panics
 	///
@@ -139,8 +143,8 @@ impl<E, P, W> Builder<E, P, W>
 		}
 	}
 
-	/// Creates the Disruptor and returns a [Producer<E>] used for publishing into the Disruptor (single
-	/// thread).
+	/// Creates the Disruptor and returns a [`Producer<E>`] used for publishing into the Disruptor
+	/// (single thread).
 	pub fn create_with_single_producer(self) -> Producer<E> {
 		let producer_barrier = SingleProducerBarrier::new();
 		let disruptor        = Box::into_raw(

@@ -1,3 +1,5 @@
+//! This module contains different producer handles for publishing into the Disruptor.
+
 use crossbeam_utils::CachePadded;
 use std::sync::atomic::{AtomicI64, Ordering};
 use crate::consumer::Receiver;
@@ -31,6 +33,7 @@ impl ProducerBarrier for SingleProducerBarrier {
 	}
 }
 
+/// Producer for publishing to the Disruptor from a single thread.
 pub struct Producer<E> {
 	disruptor: *mut Disruptor<E, SingleProducerBarrier>,
 	receiver: Receiver,
@@ -39,6 +42,11 @@ pub struct Producer<E> {
 
 unsafe impl<E: Send> Send for Producer<E> {}
 
+/// Error indicating that the ring buffer is full.
+///
+/// Client code can then take appropriate action, e.g. discard data or even panic as this indicates
+/// that the consumers cannot keep up - i.e. latency.
+#[derive(Debug)]
 pub struct RingBufferFull;
 
 impl<E> Producer<E> {
@@ -54,6 +62,7 @@ impl<E> Producer<E> {
 		}
 	}
 
+	#[inline]
 	fn disruptor(&self) -> &Disruptor<E, SingleProducerBarrier> {
 		unsafe { &*self.disruptor }
 	}
@@ -68,33 +77,28 @@ impl<E> Producer<E> {
 	/// ```
 	///# use disruptor::Builder;
 	///# use disruptor::BusySpin;
+	///# use disruptor::producer::RingBufferFull;
 	///#
 	/// // The data entity on the ring buffer.
 	/// struct Event {
 	/// 	price: f64
 	/// }
-	///# let factory = || { Event { price: 0.0 }};
+	///# fn main() -> Result<(), RingBufferFull> {
+	/// let factory = || { Event { price: 0.0 }};
 	///# let processor = |e: &Event| {};
 	///# let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
 	/// producer.try_publish(|e| { e.price = 42.0; })?;
+	///# Ok(())
+	///# }
 	/// ```
 	///
-	/// See also [Self::publish].
+	/// See also [`Self::publish`].
 	#[inline]
 	pub fn try_publish<F>(&mut self, update: F) -> Result<i64, RingBufferFull>
 		where F: FnOnce(&mut E) -> ()
 	{
 		let sequence  = self.next_sequence()?;
-		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
-		// can now update the data.
-		let disruptor = self.disruptor();
-		unsafe {
-			let element = &mut *disruptor.get(sequence);
-			update(element);
-		}
-		// Publish by publishing `sequence`.
-		disruptor.producer_barrier.publish(sequence);
-
+		self.apply_update(sequence, update);
 		Ok(sequence)
 	}
 
@@ -142,18 +146,30 @@ impl<E> Producer<E> {
 	/// producer.publish(|e| { e.price = 42.0; });
 	/// ```
 	///
-	/// See also [Self::try_publish].
+	/// See also [`Self::try_publish`].
 	#[inline]
 	pub fn publish<F>(&mut self, update: F)
 		where F: FnOnce(&mut E) -> ()
 	{
-		let sequence = loop {
-			break match self.next_sequence() {
-				Ok(sequence)        => sequence,
-				Err(RingBufferFull) => continue
+		let sequence =
+			if let Ok(sequence) = self.next_sequence() { // Optimize for the common case.
+				sequence
+			}
+			else {
+				loop {
+					break match self.next_sequence() {
+						Ok(sequence)        => sequence,
+						Err(RingBufferFull) => continue
+					};
+				}
 			};
-		};
 
+		self.apply_update(sequence, update);
+	}
+
+	/// Precondition: `sequence` is available for publication.
+	#[inline]
+	fn apply_update<F>(&mut self, sequence: i64, update: F) where F: FnOnce(&mut E) -> () {
 		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
 		// can now update the data.
 		let disruptor = self.disruptor(); // Re-borrow as mutated above.

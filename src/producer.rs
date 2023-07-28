@@ -79,7 +79,7 @@ impl<E> Producer<E> {
 	///# use disruptor::BusySpin;
 	///# use disruptor::producer::RingBufferFull;
 	///#
-	/// // The data entity on the ring buffer.
+	/// // The example data entity on the ring buffer.
 	/// struct Event {
 	///     price: f64
 	/// }
@@ -111,7 +111,7 @@ impl<E> Producer<E> {
 	///# use disruptor::Builder;
 	///# use disruptor::BusySpin;
 	///#
-	/// // The data entity on the ring buffer.
+	/// // The example data entity on the ring buffer.
 	/// struct Event {
 	///     price: f64
 	/// }

@@ -187,12 +187,12 @@ impl<T, P: ProducerBarrier> DisruptorWrapper<T, P> {
 
 impl<E, P: ProducerBarrier> Disruptor<E, P> {
 	fn shut_down(&self) {
-		self.shutting_down.store(true, Ordering::Release);
+		self.shutting_down.store(true, Ordering::Relaxed);
 	}
 
 	#[inline]
 	fn is_shutting_down(&self) -> bool {
-		self.shutting_down.load(Ordering::Acquire)
+		self.shutting_down.load(Ordering::Relaxed)
 	}
 
 	#[inline]

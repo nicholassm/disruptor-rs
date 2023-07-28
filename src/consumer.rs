@@ -30,11 +30,11 @@ impl Receiver {
 					wait_strategy.wait_for(sequence);
 					available = disruptor.get_highest_published();
 				}
+				let end_of_batch = available == sequence;
 				// SAFETY: Now, we have exclusive access to the element at `sequence`.
 				let mut_element = disruptor.get(sequence);
 				unsafe {
 					let element: &E  = &*mut_element;
-					let end_of_batch = available == sequence;
 					process(element, sequence, end_of_batch);
 				}
 				// Signal to producers that we're done processing `sequence`.

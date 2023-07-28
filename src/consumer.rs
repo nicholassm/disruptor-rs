@@ -13,7 +13,7 @@ impl Receiver {
 	pub(crate) fn new<E, F, W, P>(wrapper: DisruptorWrapper<E, P>, mut process: F, wait_strategy: W) -> Receiver where
 		F: Send + FnMut(&E, i64, bool) + 'static,
 		E: 'static,
-		W: WaitStrategy + Send + 'static,
+		W: WaitStrategy + 'static,
 		P: ProducerBarrier + 'static
 	{
 		let join_handle: JoinHandle<()> = thread::spawn(move || {

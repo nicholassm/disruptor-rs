@@ -5,12 +5,12 @@ use crate::DisruptorWrapper;
 use crate::producer::ProducerBarrier;
 use crate::wait_strategies::WaitStrategy;
 
-pub(crate) struct Receiver {
+pub(crate) struct Consumer {
 	join_handle: Option<JoinHandle<()>>
 }
 
-impl Receiver {
-	pub(crate) fn new<E, F, W, P>(wrapper: DisruptorWrapper<E, P>, mut process: F, wait_strategy: W) -> Receiver where
+impl Consumer {
+	pub(crate) fn new<E, F, W, P>(wrapper: DisruptorWrapper<E, P>, mut process: F, wait_strategy: W) -> Consumer where
 		F: Send + FnMut(&E, i64, bool) + 'static,
 		E: 'static,
 		W: WaitStrategy + 'static,
@@ -43,7 +43,7 @@ impl Receiver {
 			}
 		});
 
-		Receiver { join_handle: Some(join_handle) }
+		Consumer { join_handle: Some(join_handle) }
 	}
 
 	pub(crate) fn join(&mut self) {

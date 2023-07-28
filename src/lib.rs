@@ -50,7 +50,7 @@ mod consumer;
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use crossbeam_utils::CachePadded;
-use crate::consumer::Receiver;
+use crate::consumer::Consumer;
 use crate::producer::{ProducerBarrier, Producer, SingleProducerBarrier};
 use crate::wait_strategies::WaitStrategy;
 
@@ -162,8 +162,8 @@ impl<E, P, W> Builder<E, P, W> where
 			)
 		);
 
-		let wrapper  = DisruptorWrapper { disruptor };
-		let receiver = Receiver::new(wrapper, self.processor, self.wait_strategy);
+		let wrapper  = DisruptorWrapper(disruptor);
+		let receiver = Consumer::new(wrapper, self.processor, self.wait_strategy);
 		Producer::new(disruptor, receiver, self.ring_buffer_size - 1)
 	}
 }
@@ -172,16 +172,14 @@ struct Slot<E> {
 	event: UnsafeCell<E>
 }
 
-struct DisruptorWrapper<T, P: ProducerBarrier> {
-	disruptor: *mut Disruptor<T, P>
-}
+// Needed for providing a `Disruptor` reference to the Consumer thread.
+struct DisruptorWrapper<T, P: ProducerBarrier> (*mut Disruptor<T, P>);
 
 unsafe impl<E, P: ProducerBarrier> Send for DisruptorWrapper<E, P> {}
 
-impl<T, P: ProducerBarrier> DisruptorWrapper<T, P> {
-	#[inline]
-	fn unwrap(&self) -> &Disruptor<T, P> {
-		unsafe { &*self.disruptor }
+impl<E, P: ProducerBarrier> DisruptorWrapper<E, P> {
+	fn unwrap(&self) -> &Disruptor<E, P> {
+		unsafe { &*self.0 }
 	}
 }
 

@@ -2,7 +2,7 @@
 
 use crossbeam_utils::CachePadded;
 use std::sync::atomic::{AtomicI64, Ordering};
-use crate::consumer::Receiver;
+use crate::consumer::Consumer;
 use crate::Disruptor;
 
 pub(crate) trait ProducerBarrier {
@@ -36,7 +36,7 @@ impl ProducerBarrier for SingleProducerBarrier {
 /// Producer for publishing to the Disruptor from a single thread.
 pub struct Producer<E> {
 	disruptor: *mut Disruptor<E, SingleProducerBarrier>,
-	receiver: Receiver,
+	receiver: Consumer,
 	available_publisher_sequence: i64,
 }
 
@@ -52,7 +52,7 @@ pub struct RingBufferFull;
 impl<E> Producer<E> {
 	pub(crate) fn new(
 		disruptor: *mut Disruptor<E, SingleProducerBarrier>,
-		receiver: Receiver,
+		receiver: Consumer,
 		available_publisher_sequence: i64
 	) -> Self {
 		Producer {

@@ -103,7 +103,7 @@ impl<E> Producer<E> {
 
 	/// Publish an Event into the Disruptor.
 	///
-	/// Blocks until there is an available slot in case the ring buffer is full.
+	/// Spins until there is an available slot in case the ring buffer is full.
 	///
 	/// # Examples
 	///
@@ -124,33 +124,19 @@ impl<E> Producer<E> {
 	/// See also [`Self::try_publish`].
 	#[inline]
 	pub fn publish<F>(&mut self, update: F) where F: FnOnce(&mut E) {
-		let sequence =
-			if let Ok(sequence) = self.next_sequence() { // Optimize for the common case.
-				sequence
-			}
-			else {
-				loop {
-					break match self.next_sequence() {
-						Ok(sequence)        => sequence,
-						Err(RingBufferFull) => continue
-					};
-				}
-			};
-
-		self.apply_update(sequence, update);
+		while let Err(RingBufferFull) = self.next_sequence() { /* Empty. */ }
+		self.apply_update(update).expect("Ringbuffer should not be full.");
 	}
 
 	#[inline]
 	fn next_sequence(&mut self) -> Result<i64, RingBufferFull> {
-		let disruptor        = self.disruptor();
-		// Only one producer can publish so we can load it once.
-		let last_produce_seq = disruptor.producer_barrier.cursor.load(Ordering::Relaxed);
-		let sequence         = last_produce_seq + 1;
+		let disruptor = self.disruptor();
+		let sequence  = self.sequence;
 
 		if self.available_publisher_sequence < sequence {
 			// We have to check where the consumer is in case we're about to
 			// publish into the slot currently being read by the consumer.
-			// (Consumer is an entire ring buffer behind the publisher).
+			// (Consumer is an entire ring buffer behind the producer).
 			let wrap_point        = disruptor.wrap_point(sequence);
 			let consumer_sequence = disruptor.consumer_barrier.load(Ordering::Acquire);
 			if consumer_sequence == wrap_point {
@@ -167,16 +153,20 @@ impl<E> Producer<E> {
 
 	/// Precondition: `sequence` is available for publication.
 	#[inline]
-	fn apply_update<F>(&mut self, sequence: i64, update: F) where F: FnOnce(&mut E) {
+	fn apply_update<F>(&mut self, update: F) -> Result<i64, RingBufferFull> where F: FnOnce(&mut E) {
 		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
 		// can now update the data.
-		let disruptor = self.disruptor(); // Re-borrow as mutated above.
+		let sequence  = self.sequence;
+		let disruptor = self.disruptor();
 		unsafe {
 			let element = &mut *disruptor.get(sequence);
 			update(element);
 		}
 		// Publish by publishing `sequence`.
 		disruptor.producer_barrier.publish(sequence);
+		// Update sequence that will be published the next time.
+		self.sequence += 1;
+		Ok(sequence)
 	}
 }
 

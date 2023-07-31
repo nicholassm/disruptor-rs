@@ -3,6 +3,16 @@
 //! Use it when a single thread is not enough and you need multiple threads to communicate
 //! with the lowest latency possible.
 //!
+//! # General Usage
+//!
+//! The Disruptor in this library can only be used once. It also owns and manages the processing
+//! thread(s) for the convenience of the library users.
+//!
+//! When the Disruptor is created, you choose whether publication to the Disruptor will happen from
+//! one or multiple threads via **Producer** handles.
+//! In any case, when the last Producer goes out of scope, all events published are processed and
+//! then the processing thread(s) will be stopped and the entire Disruptor will be dropped.
+//!
 //! # Examples
 //! ```
 //! use disruptor::Builder;
@@ -85,12 +95,12 @@ impl<E, P, W> Builder<E, P, W> where
 
 	/// Creates a Builder for a Disruptor.
 	///
-	/// The `size` must be a power of 2.
-	///
-	/// The `event_factory` is used for populating the initial values in the ring buffer and
-	/// the `processor`closure will be invoked on each available event `E`.
-	/// The `wait_strategy` determines what to do when there are no available events yet.
-	/// (See module [`wait_strategies`] for the available options.)
+	/// The required parameters are:
+	/// - The `size` of the ring buffer. Must be a power of 2.
+	/// - The `event_factory` is used for populating the initial values in the ring buffer.
+	/// - The `processor` closure which will be invoked on each available event `E`.
+	/// - The `wait_strategy` determines what to do when there are no available events yet.
+	///   (See module [`wait_strategies`] for the available options.)
 	///
 	/// # Panics
 	///
@@ -99,17 +109,17 @@ impl<E, P, W> Builder<E, P, W> where
 	/// # Examples
 	///
 	/// ```
-	/// // The data entity on the ring buffer.
 	/// use disruptor::wait_strategies::BusySpin;
 	///
+	/// // The data entity on the ring buffer.
 	/// struct Event {
 	///     price: f64
 	/// }
 	///
-	/// // Create a factory for populating the ring buffer with events.
+	/// // Define a factory for populating the ring buffer with events.
 	/// let factory = || { Event { price: 0.0 }};
 	///
-	/// // Create a closure for processing events. A thread, controlled by the disruptor, will run
+	/// // Define a closure for processing events. A thread, controlled by the disruptor, will run
 	/// // this processor each time an event is published.
 	/// let processor = |e: &Event, sequence: i64, end_of_batch: bool| {
 	///     // Process e.
@@ -118,7 +128,8 @@ impl<E, P, W> Builder<E, P, W> where
 	/// // Create a Disruptor by using a `disruptor::Builder`, In this example, the ring buffer has
 	/// // size 8 and the `BusySpin` wait strategy. Finally, the Disruptor is built by specifying that
 	/// // only a single thread will publish into the Disruptor (via a `Producer` handle).
-	/// let mut publisher = disruptor::Builder::new(8, factory, processor, BusySpin);
+	/// let mut publisher = disruptor::Builder::new(8, factory, processor, BusySpin)
+	///     .create_with_single_producer();
 	/// ```
 	pub fn new<F>(size: usize, mut event_factory: F, processor: P, wait_strategy: W) -> Builder<E, P, W> where
 		F: FnMut() -> E

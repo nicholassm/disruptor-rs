@@ -2,7 +2,7 @@
 name          = "disruptor"
 version       = "0.1.0"
 edition       = "2021"
-description   = "Low latency inter-thread communication via a ringbuffer (inspired by LMAX Disruptor)."
+description   = "Low latency inter-thread communication via a ringbuffer (inspired by the LMAX Disruptor)."
 license       = "MIT"
 authors       = ["Nicholas <nicholassm@gmail.com>"]
 repository    = "https://github.com/nicholassm/disruptor-rs"

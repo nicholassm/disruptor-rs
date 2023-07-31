@@ -20,26 +20,29 @@ impl Consumer {
 			let disruptor    = wrapper.unwrap();
 			let mut sequence = 0i64;
 			loop {
-				let mut available = disruptor.get_highest_published();
+				let mut available = disruptor.get_highest_published(sequence);
 
 				while available < sequence {
 					if disruptor.is_shutting_down() {
 						// Recheck that no new published events are present.
-						if disruptor.get_highest_published() < sequence { return }
+						if disruptor.get_highest_published(sequence) < sequence { return }
 					}
 					wait_strategy.wait_for(sequence);
-					available = disruptor.get_highest_published();
+					available = disruptor.get_highest_published(sequence);
 				}
-				let end_of_batch = available == sequence;
-				// SAFETY: Now, we have exclusive access to the element at `sequence`.
-				let mut_element = disruptor.get(sequence);
-				unsafe {
-					let element: &E  = &*mut_element;
-					process(element, sequence, end_of_batch);
+
+				while available >= sequence {
+					let end_of_batch = available == sequence;
+					// SAFETY: Now, we have exclusive access to the element at `sequence`.
+					let mut_element  = disruptor.get(sequence);
+					unsafe {
+						let element: &E = &*mut_element;
+						process(element, sequence, end_of_batch);
+					}
+					// Signal to producers that we're done processing `sequence`.
+					sequence += 1;
+					disruptor.consumer_barrier.store(sequence, Ordering::Release);
 				}
-				// Signal to producers that we're done processing `sequence`.
-				sequence += 1;
-				disruptor.consumer_barrier.store(sequence, Ordering::Release);
 			}
 		});
 

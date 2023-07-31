@@ -23,20 +23,22 @@
 //!     price: f64
 //! }
 //!
-//! // Create a factory for populating the ring buffer with events.
+//! // Define a factory for populating the ring buffer with events.
 //! let factory = || { Event { price: 0.0 }};
 //!
-//! // Create a closure for processing events. A thread, controlled by the disruptor, will run this
+//! // Define a closure for processing events. A thread, controlled by the disruptor, will run this
 //! // processor each time an event is published.
 //! let processor = |e: &Event, sequence: i64, end_of_batch: bool| {
-//!     // Process e.
-//!     // If end_of_batch is false, you can batch up events until it's invoked with
-//!     // end_of_batch=true.
+//!     // Process the Event `e` published at `sequence`.
+//!     // If `end_of_batch` is false, you can batch up events until it's invoked with
+//!     // `end_of_batch` being true.
 //! };
 //!
 //! // Create a Disruptor by using a `disruptor::Builder`, In this example, the ring buffer has
-//! // size 8 and the `BusySpin` wait strategy. Finally, the Disruptor is built by specifying that
-//! // only a single thread will publish into the Disruptor (via a `Producer` handle).
+//! // size 8 and the `BusySpin` wait strategy.
+//! // Finally, the Disruptor is built by specifying that only a single thread will publish into
+//! // the Disruptor (via a `Producer` handle). There's also a `create_with_multi_producer()` for
+//! // publication from multiple threads.
 //! let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
 //! // Publish into the Disruptor.
 //! for i in 0..10 {
@@ -45,13 +47,14 @@
 //!     });
 //! }
 //! // At this point, the processor thread processes all published events and then stops as
-//! // the Producer instance goes out of scope and the Producer and Disruptor are dropped.
+//! // the Producer instance goes out of scope and the Disruptor (and the Producer) are dropped.
 //! ```
 
 #![deny(rustdoc::broken_intra_doc_links)]
 #![warn(missing_docs)]
 
 pub use wait_strategies::BusySpin;
+pub use wait_strategies::BusySpinWithSpinLoopHint;
 
 pub mod wait_strategies;
 pub mod producer;
@@ -61,7 +64,7 @@ use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use crossbeam_utils::CachePadded;
 use crate::consumer::Consumer;
-use crate::producer::{ProducerBarrier, Producer, SingleProducerBarrier};
+use crate::producer::{ProducerBarrier, Producer, SingleProducerBarrier, MultiProducer, MultiProducerBarrier};
 use crate::wait_strategies::WaitStrategy;
 
 pub(crate) struct Disruptor<E, P: ProducerBarrier> {
@@ -177,6 +180,28 @@ impl<E, P, W> Builder<E, P, W> where
 		let receiver = Consumer::new(wrapper, self.processor, self.wait_strategy);
 		Producer::new(disruptor, receiver, self.ring_buffer_size - 1)
 	}
+
+	/// Creates the Disruptor and returns a [`MultiProducer<E>`] used for publishing into the Disruptor
+	/// (multiple threads).
+	pub fn create_with_multi_producer(self) -> MultiProducer<E> {
+		let producer_barrier = MultiProducerBarrier::new(self.ring_buffer_size as usize);
+		let disruptor        = Box::into_raw(
+			Box::new(
+				Disruptor {
+					producer_barrier,
+					shutting_down:    self.shutting_down,
+					consumer_barrier: self.consumer_barrier,
+					ring_buffer_size: self.ring_buffer_size,
+					ring_buffer:      self.ring_buffer,
+					index_mask:       self.index_mask
+				}
+			)
+		);
+
+		let wrapper  = DisruptorWrapper(disruptor);
+		let consumer = Consumer::new(wrapper, self.processor, self.wait_strategy);
+		MultiProducer::new(disruptor, consumer)
+	}
 }
 
 struct Slot<E> {
@@ -205,8 +230,8 @@ impl<E, P: ProducerBarrier> Disruptor<E, P> {
 	}
 
 	#[inline]
-	fn get_highest_published(&self) -> i64 {
-		self.producer_barrier.get_highest_available()
+	fn get_highest_published(&self, lower_bound: i64) -> i64 {
+		self.producer_barrier.get_highest_available(lower_bound)
 	}
 
 	#[inline]
@@ -226,6 +251,7 @@ mod tests {
 	use std::thread;
 	use crate::BusySpin;
 	use std::sync::mpsc;
+	use crate::wait_strategies::BusySpinWithSpinLoopHint;
 	use super::*;
 
 	#[test]
@@ -304,5 +330,47 @@ mod tests {
 
 		let result: Vec<_> = r.iter().collect();
 		assert_eq!(result, [0, 4, 16, 36, 64, 100, 144, 196, 256, 324]);
+	}
+
+	#[test]
+	fn test_multi_publisher_disruptor() {
+		let factory   = || { Event { price: 0, size: 0, data: Data { data: "".to_owned() } } };
+		let num_items = 100;
+		let (s, r)    = mpsc::channel();
+
+		let processor = move |e: &Event, _, _| {
+			s.send(e.price).expect("Should be able to send.");
+		};
+
+		let mut producer  = Builder::new(8, factory, processor, BusySpinWithSpinLoopHint).create_with_multi_producer();
+		let mut producer2 = producer.clone();
+
+		let producer_thread1 = thread::spawn(move || {
+			for i in 0..num_items/2 {
+				producer.publish(|e| {
+					e.price = i as i64;
+					e.size  = i as i64;
+					e.data  = Data { data: i.to_string() }
+				});
+			}
+		});
+
+		let producer_thread2 = thread::spawn(move || {
+			for i in (num_items/2)..num_items {
+				producer2.publish(|e| {
+					e.price = i as i64;
+					e.size  = i as i64;
+					e.data  = Data { data: i.to_string() }
+				});
+			}
+		});
+
+		producer_thread1.join().unwrap();
+		producer_thread2.join().unwrap();
+
+		let mut result: Vec<_> = r.iter().collect();
+		result.sort();
+		let expected: Vec<i64> = (0..num_items).map(|n| { n as i64 }).collect();
+		assert_eq!(result, expected);
 	}
 }

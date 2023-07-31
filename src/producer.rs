@@ -1,13 +1,16 @@
-//! This module contains different producer handles for publishing into the Disruptor.
+//! Module with different producer handles for publishing into the Disruptor.
+//!
+//! Both publishing from a single thread (fastest) and multiple threads is supported.
 
+use std::process;
 use crossbeam_utils::CachePadded;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
 use crate::consumer::Consumer;
 use crate::Disruptor;
 
 pub(crate) trait ProducerBarrier {
 	fn publish(&self, sequence: i64);
-	fn get_highest_available(&self) -> i64;
+	fn get_highest_available(&self, lower_bound: i64) -> i64;
 }
 
 pub(crate) struct SingleProducerBarrier {
@@ -28,15 +31,21 @@ impl ProducerBarrier for SingleProducerBarrier {
 	}
 
 	#[inline]
-	fn get_highest_available(&self) -> i64 {
+	fn get_highest_available(&self, _lower_bound: i64) -> i64 {
 		self.cursor.load(Ordering::Acquire)
 	}
 }
 
 /// Producer for publishing to the Disruptor from a single thread.
+///
+/// See also [`MultiProducer`] for multi-threaded publication.
 pub struct Producer<E> {
 	disruptor: *mut Disruptor<E, SingleProducerBarrier>,
-	receiver: Consumer,
+	consumer: Consumer,
+	/// Current sequence about to be published.
+	sequence: i64,
+	/// Highest sequence available for publication because the Consumers are "enough" behind
+	/// to not interfere.
 	available_publisher_sequence: i64,
 }
 
@@ -52,13 +61,14 @@ pub struct RingBufferFull;
 impl<E> Producer<E> {
 	pub(crate) fn new(
 		disruptor: *mut Disruptor<E, SingleProducerBarrier>,
-		receiver: Consumer,
+		consumer: Consumer,
 		available_publisher_sequence: i64
 	) -> Self {
 		Producer {
 			disruptor,
-			receiver,
-			available_publisher_sequence
+			consumer,
+			sequence: 0,
+			available_publisher_sequence,
 		}
 	}
 
@@ -94,11 +104,9 @@ impl<E> Producer<E> {
 	///
 	/// See also [`Self::publish`].
 	#[inline]
-	pub fn try_publish<F>(&mut self, update: F) -> Result<i64, RingBufferFull> where F: FnOnce(&mut E)
-	{
-		let sequence  = self.next_sequence()?;
-		self.apply_update(sequence, update);
-		Ok(sequence)
+	pub fn try_publish<F>(&mut self, update: F) -> Result<i64, RingBufferFull> where F: FnOnce(&mut E) {
+		self.next_sequence()?;
+		self.apply_update(update)
 	}
 
 	/// Publish an Event into the Disruptor.
@@ -174,11 +182,331 @@ impl<E> Producer<E> {
 impl<E> Drop for Producer<E> {
 	fn drop(&mut self) {
 		self.disruptor().shut_down();
-		self.receiver.join();
+		self.consumer.join();
 
 		// Safety: Both publishers and receivers are done accessing the Disruptor.
 		unsafe {
 			drop(Box::from_raw(self.disruptor));
 		}
+	}
+}
+
+pub(crate) struct MultiProducerBarrier {
+	cursor:      CachePadded<AtomicI64>,
+	available:   Box<[AtomicI32]>,
+	index_mask:  usize,
+	index_shift: usize,
+}
+
+impl MultiProducerBarrier {
+	pub(crate) fn new(size: usize) -> MultiProducerBarrier {
+		let cursor      = CachePadded::new(AtomicI64::new(-1));
+		let available   = (0..size).map(|_i| { AtomicI32::new(-1) }).collect();
+		let index_mask  = (size - 1) as usize;
+		let index_shift = Self::log2(size);
+
+		MultiProducerBarrier { cursor, available, index_mask, index_shift }
+	}
+
+	fn log2(i: usize) -> usize {
+		std::mem::size_of::<usize>()*8 - (i.leading_zeros() as usize) - 1
+	}
+
+	#[inline]
+	fn next(&self) -> i64 {
+		self.cursor.fetch_add(1, Ordering::AcqRel) + 1
+	}
+
+	#[inline]
+	fn calculate_availability_index(&self, sequence: i64) -> usize {
+		sequence as usize & self.index_mask
+	}
+
+	#[inline]
+	fn calculate_availability_flag(&self, sequence: i64) -> i32 {
+		(sequence >> self.index_shift) as i32
+	}
+
+	#[inline]
+	fn get_availability(&self, sequence: i64) -> &AtomicI32 {
+		let availability_index = self.calculate_availability_index(sequence);
+		unsafe {
+			self.available.get_unchecked(availability_index)
+		}
+	}
+
+	#[inline]
+	fn is_published(&self, sequence: i64) -> bool {
+		let availability      = self.get_availability(sequence);
+		let availability_flag = self.calculate_availability_flag(sequence);
+		availability.load(Ordering::Acquire) == availability_flag
+	}
+}
+
+impl ProducerBarrier for MultiProducerBarrier {
+	#[inline]
+	fn publish(&self, sequence: i64) {
+		let availability      = self.get_availability(sequence);
+		let availability_flag = self.calculate_availability_flag(sequence);
+		availability.store(availability_flag, Ordering::Release);
+	}
+
+	/// Returns highest available sequence number for consumption.
+	/// `lower_bound - 1` must have been previously available.
+	#[inline]
+	fn get_highest_available(&self, lower_bound: i64) -> i64 {
+		let mut highest_available = lower_bound;
+		loop {
+			if ! self.is_published(highest_available) {
+				return highest_available - 1;
+			}
+			highest_available += 1;
+		}
+	}
+}
+
+struct SharedProducer {
+	consumer: Consumer,
+	counter:  AtomicI64,
+}
+
+/// Producer for publishing to the Disruptor from one of many threads.
+///
+/// # Examples
+///
+/// ```
+///# use disruptor::Builder;
+///# use disruptor::BusySpin;
+///# use disruptor::producer::RingBufferFull;
+///# use std::thread;
+/// // The example data entity on the ring buffer.
+/// struct Event {
+///     price: f64
+/// }
+///
+/// let factory = || { Event { price: 0.0 }};
+/// let processor = |e: &Event, _, _| {};
+/// let mut producer1 = Builder::new(8, factory, processor, BusySpin).create_with_multi_producer();
+/// let mut producer2 = producer1.clone();
+/// let thread1 = thread::spawn(move || {
+///     producer1.publish(|e| { e.price = 24.0; });
+/// });
+/// let thread2 = thread::spawn(move || {
+///     producer2.publish(|e| { e.price = 42.0; });
+/// });
+///# thread1.join().expect("should join.");
+///# thread2.join().expect("should join.");
+/// ```
+///
+/// See also [`Producer`] for single-threaded publication.
+pub struct MultiProducer<E> {
+	disruptor:                    *mut Disruptor<E, MultiProducerBarrier>,
+	shared_producer:              *mut SharedProducer,
+	// Next sequence number to publish.
+	sequence:                     i64,
+	available_publisher_sequence: i64,
+}
+
+// Indicates no sequence number has been claimed (yet).
+const NONE: i64 = -1;
+
+unsafe impl<E: Send> Send for MultiProducer<E> {}
+unsafe impl<E: Send> Sync for MultiProducer<E> {}
+
+impl<E> Clone for MultiProducer<E> {
+	fn clone(&self) -> Self {
+		let count = self.shared().counter.fetch_add(1, Ordering::AcqRel);
+
+		// Cloning publishers and calling `mem::forget` on the clones could potentially overflow the
+		// counter. It's very difficult to recover sensibly from such degenerate scenarios so we
+		// just abort when the count becomes very large.
+		if count > i64::MAX/2 {
+			process::abort();
+		}
+
+		// Known to be available initially as consumers start at index 0.
+		let available_publisher_sequence = unsafe { (*self.disruptor).ring_buffer_size - 1 };
+
+		MultiProducer {
+			disruptor:       self.disruptor,
+			shared_producer: self.shared_producer,
+			sequence:        NONE,
+			available_publisher_sequence
+		}
+	}
+}
+
+impl<E> Drop for MultiProducer<E> {
+	fn drop(&mut self) {
+		let old_count = self.shared().counter.fetch_sub(1, Ordering::AcqRel);
+		if old_count == 1 {
+			self.disruptor().shut_down();
+
+			// Safety: Both producers and consumers are done accessing the Disruptor and
+			// the shared_producer.
+			unsafe {
+				(*self.shared_producer).consumer.join();
+
+				drop(Box::from_raw(self.disruptor));
+				drop(Box::from_raw(self.shared_producer));
+			}
+		}
+	}
+}
+
+impl<E> MultiProducer<E> {
+	pub(crate) fn new(
+		disruptor: *mut Disruptor<E, MultiProducerBarrier>,
+		consumer: Consumer) -> Self {
+		let shared_producer = Box::into_raw(
+			Box::new(
+				SharedProducer {
+					consumer,
+					counter: AtomicI64::new(1)
+				}
+			)
+		);
+		// Known to be available initially as consumers start at index 0.
+		let available_publisher_sequence = unsafe { (*disruptor).ring_buffer_size - 1 };
+		MultiProducer {
+			disruptor,
+			shared_producer,
+			sequence: NONE,
+			available_publisher_sequence
+		}
+	}
+
+	#[inline]
+	fn disruptor(&self) -> &Disruptor<E, MultiProducerBarrier> {
+		unsafe { &*self.disruptor }
+	}
+
+	#[inline]
+	fn shared(&self) -> &SharedProducer {
+		unsafe { & *self.shared_producer }
+	}
+
+	#[inline]
+	fn claim_next_sequence(&mut self) -> Result<i64, RingBufferFull> {
+		let disruptor = self.disruptor();
+		// We get the last produced sequence number and increment it for the next publisher.
+		// `sequence` is now exclusive for this producer.
+		// We need to store it, because ring buffer could be full (and the producer barrier has
+		// already increased its publication counter).
+		if self.sequence == NONE {
+			let next_sequence = disruptor.producer_barrier.next();
+			self.sequence     = next_sequence;
+		}
+		let disruptor = self.disruptor();
+		let sequence  = self.sequence;
+
+		if self.available_publisher_sequence < sequence {
+			// We have to check where the consumer is in case we're about to
+			// publish into the slot currently being read by the consumer.
+			// (Consumer is an entire ring buffer behind the producer).
+			let wrap_point        = disruptor.wrap_point(sequence);
+			let consumer_sequence = disruptor.consumer_barrier.load(Ordering::Acquire);
+			if consumer_sequence <= wrap_point {
+				return Err(RingBufferFull);
+			}
+
+			// We can now continue until we get right behind the consumer's current
+			// position without checking where it actually is.
+			self.available_publisher_sequence = consumer_sequence + disruptor.ring_buffer_size - 1;
+		}
+
+		Ok(sequence)
+	}
+
+	/// Precondition: `sequence` is available for publication.
+	#[inline]
+	fn apply_update<F>(&mut self, update: F) -> Result<i64, RingBufferFull> where F: FnOnce(&mut E) {
+		let sequence = self.sequence;
+		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
+		// can now update the data.
+		let disruptor = self.disruptor();
+		unsafe {
+			let element = &mut *disruptor.get(sequence);
+			update(element);
+		}
+		// Make publication available by publishing `sequence`.
+		disruptor.producer_barrier.publish(sequence);
+		// sequence is now used - replace it with None.
+		self.sequence = NONE;
+		Ok(sequence)
+	}
+
+	/// Publish an Event into the Disruptor.
+	///
+	/// Returns a `Result` with the published sequence number or a [RingBufferFull] in case the
+	/// ring buffer is full.
+	///
+	/// # Examples
+	///
+	/// ```
+	///# use disruptor::Builder;
+	///# use disruptor::BusySpin;
+	///# use disruptor::producer::RingBufferFull;
+	///#
+	/// // The example data entity on the ring buffer.
+	/// struct Event {
+	///     price: f64
+	/// }
+	///# fn main() -> Result<(), RingBufferFull> {
+	///# let factory = || { Event { price: 0.0 }};
+	///# let processor = |e: &Event, _, _| {};
+	///# let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_multi_producer();
+	/// producer.try_publish(|e| { e.price = 42.0; })?;
+	///# Ok(())
+	///# }
+	/// ```
+	///
+	/// See also [`Self::publish`].
+	#[inline]
+	pub fn try_publish<F: FnOnce(&mut E)>(&mut self, update: F) -> Result<i64, RingBufferFull> {
+		self.claim_next_sequence()?;
+		self.apply_update(update)
+	}
+
+	/// Publish an Event into the Disruptor.
+	///
+	/// Spins until there is an available slot in case the ring buffer is full.
+	///
+	/// # Examples
+	///
+	/// ```
+	///# use disruptor::Builder;
+	///# use disruptor::BusySpin;
+	///#
+	/// // The example data entity on the ring buffer.
+	/// struct Event {
+	///     price: f64
+	/// }
+	///# let factory      = || { Event { price: 0.0 }};
+	///# let processor    = |e: &Event, _, _| {};
+	///# let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_multi_producer();
+	/// producer.publish(|e| { e.price = 42.0; });
+	/// ```
+	///
+	/// See also [`Self::try_publish`].
+	#[inline]
+	pub fn publish<F: FnOnce(&mut E)>(&mut self, update: F) {
+		while let Err(RingBufferFull) = self.claim_next_sequence() { /* Empty. */ }
+		self.apply_update(update).expect("Ringbuffer should not be full.");
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_log2() {
+		assert_eq!(1, MultiProducerBarrier::log2(2));
+		assert_eq!(1, MultiProducerBarrier::log2(3));
+		assert_eq!(3, MultiProducerBarrier::log2(8));
+		assert_eq!(3, MultiProducerBarrier::log2(9));
+		assert_eq!(3, MultiProducerBarrier::log2(10));
+		assert_eq!(3, MultiProducerBarrier::log2(11));
 	}
 }

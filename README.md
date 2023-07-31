@@ -15,9 +15,10 @@ To see how to use the library, check out the documentation on [docs.rs/disruptor
 
 # Features
 
-1. Single Producer Single Consumer (SPSC). See roadmap for MPSC and MPMC.
-2. Low-latency.
-3. Busy-spin wait strategy.
+1. Single Producer Single Consumer (SPSC). See roadmap for MPMC.
+2. Multi Producer Single Consumer (MPSC).
+3. Low-latency.
+4. Busy-spin wait strategies.
 
 # Design Choices
 
@@ -34,13 +35,12 @@ There are multiple other Rust projects that mimic the LMAX Disruptor library:
 1. [Turbine](https://github.com/polyfractal/Turbine)
 2. [Disrustor](https://github.com/sklose/disrustor)
 
-A key feature that this library will support (soon!) is multiple producers that
-neither of the above libraries support (at the time of writing).
+A key feature that this library supports is multiple producers from different threads
+that neither of the above libraries support (at the time of writing).
 
 # Roadmap
 
-1. Support for multiple threads publishing to the Disruptor.
+1. Support for setting thread affinity on event processor threads.
 2. Support for batch publication.
 3. Write benchmarks comparing this library to e.g. Crossbeam and the standard Rust channels.
-4. Support for setting affinity event processor threads.
-5. Support for multiple consumers/event processor threads including interdependencies.
+4. Support for multiple consumers/event processor threads including interdependencies.

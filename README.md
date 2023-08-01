@@ -15,11 +15,11 @@ To see how to use the library, check out the documentation on [docs.rs/disruptor
 
 # Features
 
-1. Single Producer Single Consumer (SPSC). See roadmap for MPMC.
-2. Multi Producer Single Consumer (MPSC).
-3. Low-latency.
-4. Busy-spin wait strategies.
-5. Batch consumption of events.
+- [x] Single Producer Single Consumer (SPSC). See roadmap for MPMC.
+- [x] Multi Producer Single Consumer (MPSC).
+- [x] Low-latency.
+- [x] Busy-spin wait strategies.
+- [x] Batch consumption of events.
 
 # Design Choices
 

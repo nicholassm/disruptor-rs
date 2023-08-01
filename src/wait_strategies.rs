@@ -2,7 +2,7 @@
 //!
 //! The lowest latency possible is the [`BusySpin`] strategy.
 //!
-//! To "waist" less CPU time and power, use one of the other strategies which has higher latency.
+//! To "waist" less CPU time and power, use one of the other strategies which have higher latency.
 
 use std::hint;
 

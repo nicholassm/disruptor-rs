@@ -5,8 +5,8 @@
 //!
 //! # General Usage
 //!
-//! The Disruptor in this library can only be used once. It also owns and manages the processing
-//! thread(s) for the convenience of the library users.
+//! The Disruptor in this library can only be used once. I.e. it cannot be rewound and restarted.
+//! It also owns and manages the processing thread(s) for the convenience of the library users.
 //!
 //! When the Disruptor is created, you choose whether publication to the Disruptor will happen from
 //! one or multiple threads via **Producer** handles.

@@ -288,14 +288,14 @@ struct SharedProducer {
 /// let processor = |e: &Event, _, _| {};
 /// let mut producer1 = Builder::new(8, factory, processor, BusySpin).create_with_multi_producer();
 /// let mut producer2 = producer1.clone();
-/// let thread1 = thread::spawn(move || {
-///     producer1.publish(|e| { e.price = 24.0; });
+/// thread::scope(|s| {
+///     s.spawn(move || {
+///         producer1.publish(|e| { e.price = 24.0; });
+///     });
+///     s.spawn(move || {
+///         producer2.publish(|e| { e.price = 42.0; });
+///     });
 /// });
-/// let thread2 = thread::spawn(move || {
-///     producer2.publish(|e| { e.price = 42.0; });
-/// });
-///# thread1.join().expect("should join.");
-///# thread2.join().expect("should join.");
 /// ```
 ///
 /// See also [`Producer`] for single-threaded publication.

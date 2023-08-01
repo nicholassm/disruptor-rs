@@ -19,6 +19,7 @@ To see how to use the library, check out the documentation on [docs.rs/disruptor
 2. Multi Producer Single Consumer (MPSC).
 3. Low-latency.
 4. Busy-spin wait strategies.
+5. Batch consumption of events.
 
 # Design Choices
 

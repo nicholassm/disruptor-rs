@@ -183,6 +183,32 @@ impl<E, P, W> Builder<E, P, W> where
 
 	/// Creates the Disruptor and returns a [`MultiProducer<E>`] used for publishing into the Disruptor
 	/// (multiple threads).
+	///
+	/// # Examples
+	///
+	/// ```
+	///# use disruptor::Builder;
+	///# use disruptor::BusySpin;
+	///# use disruptor::producer::RingBufferFull;
+	///# use std::thread;
+	/// // The example data entity on the ring buffer.
+	/// struct Event {
+	///     price: f64
+	/// }
+	///
+	/// let factory = || { Event { price: 0.0 }};
+	/// let processor = |e: &Event, _, _| {};
+	/// let mut producer1 = Builder::new(8, factory, processor, BusySpin).create_with_multi_producer();
+	/// let mut producer2 = producer1.clone();
+	/// thread::scope(|s| {
+	///     s.spawn(move || {
+	///         producer1.publish(|e| { e.price = 24.0; });
+	///     });
+	///     s.spawn(move || {
+	///         producer2.publish(|e| { e.price = 42.0; });
+	///     });
+	/// });
+	/// ```
 	pub fn create_with_multi_producer(self) -> MultiProducer<E> {
 		let producer_barrier = MultiProducerBarrier::new(self.ring_buffer_size as usize);
 		let disruptor        = Box::into_raw(
@@ -282,16 +308,17 @@ mod tests {
 		};
 
 		let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
-		let producer_thread = thread::spawn(move || {
-			for i in 0..10 {
-				producer.publish(|e| {
-					e.price    = i as i64;
-					e.size     = i as i64;
-					e.data     = Data { data: i.to_string() }
-				});
-			}
+		thread::scope(|s| {
+			s.spawn(move || {
+				for i in 0..10 {
+					producer.publish(|e| {
+						e.price    = i as i64;
+						e.size     = i as i64;
+						e.data     = Data { data: i.to_string() }
+					});
+				}
+			});
 		});
-		producer_thread.join().unwrap();
 
 		let result: Vec<_> = r.iter().collect();
 		assert_eq!(result, [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]);
@@ -317,16 +344,17 @@ mod tests {
 
 		// First Disruptor.
 		let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
-		let input = thread::spawn(move || {
-			for i in 0..10 {
-				producer.publish(|e| {
-					e.price    = i as i64;
-					e.size     = i as i64;
-					e.data     = Data { data: i.to_string() }
-				});
-			}
+		thread::scope(|s| {
+			s.spawn(move || {
+				for i in 0..10 {
+					producer.publish(|e| {
+						e.price    = i as i64;
+						e.size     = i as i64;
+						e.data     = Data { data: i.to_string() }
+					});
+				}
+			});
 		});
-		input.join().unwrap();
 
 		let result: Vec<_> = r.iter().collect();
 		assert_eq!(result, [0, 4, 16, 36, 64, 100, 144, 196, 256, 324]);
@@ -342,31 +370,30 @@ mod tests {
 			s.send(e.price).expect("Should be able to send.");
 		};
 
-		let mut producer  = Builder::new(8, factory, processor, BusySpinWithSpinLoopHint).create_with_multi_producer();
-		let mut producer2 = producer.clone();
+		let mut producer1 = Builder::new(8, factory, processor, BusySpinWithSpinLoopHint).create_with_multi_producer();
+		let mut producer2 = producer1.clone();
 
-		let producer_thread1 = thread::spawn(move || {
-			for i in 0..num_items/2 {
-				producer.publish(|e| {
-					e.price = i as i64;
-					e.size  = i as i64;
-					e.data  = Data { data: i.to_string() }
-				});
-			}
+		thread::scope(|s| {
+			s.spawn(move || {
+				for i in 0..num_items/2 {
+					producer1.publish(|e| {
+						e.price = i as i64;
+						e.size  = i as i64;
+						e.data  = Data { data: i.to_string() }
+					});
+				}
+			});
+
+			s.spawn(move || {
+				for i in (num_items/2)..num_items {
+					producer2.publish(|e| {
+						e.price = i as i64;
+						e.size  = i as i64;
+						e.data  = Data { data: i.to_string() }
+					});
+				}
+			});
 		});
-
-		let producer_thread2 = thread::spawn(move || {
-			for i in (num_items/2)..num_items {
-				producer2.publish(|e| {
-					e.price = i as i64;
-					e.size  = i as i64;
-					e.data  = Data { data: i.to_string() }
-				});
-			}
-		});
-
-		producer_thread1.join().unwrap();
-		producer_thread2.join().unwrap();
 
 		let mut result: Vec<_> = r.iter().collect();
 		result.sort();

@@ -27,7 +27,7 @@
 //! let factory = || { Event { price: 0.0 }};
 //!
 //! // Define a closure for processing events. A thread, controlled by the disruptor, will run this
-//! // processor each time an event is published.
+//! // processor closure each time an event is published.
 //! let processor = |e: &Event, sequence: i64, end_of_batch: bool| {
 //!     // Process the Event `e` published at `sequence`.
 //!     // If `end_of_batch` is false, you can batch up events until it's invoked with

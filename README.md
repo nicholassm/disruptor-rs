@@ -16,41 +16,41 @@ To read details of how to use the library, check out the documentation on [docs.
 Here's a minimal example:
 
 ```rust
-    use disruptor::Builder;
-    use disruptor::BusySpin;
-    
-    // The data entity on the ring buffer.
-    struct Event {
-        price: f64
-    }
-    
-    fn main() {
-        // Define a factory for populating the ring buffer with initialized events.
-        let factory = || { Event { price: 0.0 }};
+use disruptor::Builder;
+use disruptor::BusySpin;
 
-        // Define a closure for processing events. A thread, controlled by the disruptor, will run this
-        // processor closure each time an event is published.
-        let processor = |e: &Event, sequence: i64, end_of_batch: bool| {
-            // Process the Event `e` published at `sequence`.
-            // If `end_of_batch` is false, you can batch up events until it's invoked with
-            // `end_of_batch` being true.
-        };
+// The data entity on the ring buffer.
+struct Event {
+    price: f64
+}
 
-        // Create a Disruptor by using a `disruptor::Builder`, In this example, the ring buffer has
-        // size 8 and the `BusySpin` wait strategy.
-        // Finally, the Disruptor is built by specifying that only a single thread will publish into
-        // the Disruptor (via a `Producer` handle). There's also a `create_with_multi_producer()` for
-        // publication from multiple threads.
-        let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
-        // Publish 10 times into the Disruptor.
-        for i in 0..10 {
-            producer.publish(|e| {
-                e.price = i as f64;
-            });
-        }
-        // At this point, the processor thread processes all published events and then stops as
-        // the Producer instance goes out of scope and the Disruptor (and the Producer) are dropped.
+fn main() {
+    // Define a factory for populating the ring buffer with initialized events.
+    let factory = || { Event { price: 0.0 }};
+
+    // Define a closure for processing events. A thread, controlled by the disruptor, will run this
+    // processor closure each time an event is published.
+    let processor = |e: &Event, sequence: i64, end_of_batch: bool| {
+        // Process the Event `e` published at `sequence`.
+        // If `end_of_batch` is false, you can batch up events until it's invoked with
+        // `end_of_batch` being true.
+    };
+
+    // Create a Disruptor by using a `disruptor::Builder`, In this example, the ring buffer has
+    // size 8 and the `BusySpin` wait strategy.
+    // Finally, the Disruptor is built by specifying that only a single thread will publish into
+    // the Disruptor (via a `Producer` handle). There's also a `create_with_multi_producer()` for
+    // publication from multiple threads.
+    let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
+    // Publish 10 times into the Disruptor.
+    for i in 0..10 {
+        producer.publish(|e| {
+            e.price = i as f64;
+        });
     }
+    // At this point, the processor thread processes all published events and then stops as
+    // the Producer instance goes out of scope and the Disruptor (and the Producer) are dropped.
+}
 ```
 
 # Features

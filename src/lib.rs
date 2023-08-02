@@ -34,8 +34,8 @@
 //!     // `end_of_batch` being true.
 //! };
 //!
-//! // Create a Disruptor by using a `disruptor::Builder`, In this example, the ring buffer has
-//! // size 8 and the `BusySpin` wait strategy.
+//! // Create a Disruptor by using a `disruptor::Builder`, In this example, the ring buffer has a
+//! // size 8 and uses the `BusySpin` wait strategy.
 //! // Finally, the Disruptor is built by specifying that only a single thread will publish into
 //! // the Disruptor (via a `Producer` handle). There's also a `create_with_multi_producer()` for
 //! // publication from multiple threads.
@@ -100,8 +100,8 @@ impl<E, P, W> Builder<E, P, W> where
 	///
 	/// The required parameters are:
 	/// - The `size` of the ring buffer. Must be a power of 2. It's recommended to make the ring
-	///   buffer as small as possible to fit into as small cache as possible while big enough to
-	///   not get full while publishing at high ingestion rates.
+	///   buffer as small as possible for cache coherency while big enough to cope with bursty input
+	///   being published to the Disruptor at high ingestion rates.
 	/// - The `event_factory` is used for populating the initial values in the ring buffer.
 	/// - The `processor` closure which will be invoked on each available event `E`.
 	/// - The `wait_strategy` determines what to do when there are no available events yet.
@@ -236,7 +236,7 @@ struct Slot<E> {
 	event: UnsafeCell<E>
 }
 
-// Needed for providing a `Disruptor` reference to the Consumer thread.
+/// Needed for providing a [`Disruptor`] reference to the Consumer thread.
 struct DisruptorWrapper<T, P: ProducerBarrier> (*mut Disruptor<T, P>);
 
 unsafe impl<E, P: ProducerBarrier> Send for DisruptorWrapper<E, P> {}

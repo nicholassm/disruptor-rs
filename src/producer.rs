@@ -1,6 +1,19 @@
 //! Module with different producer handles for publishing into the Disruptor.
 //!
 //! Both publishing from a single thread (fastest) and multiple threads is supported.
+//!
+//! A `Producer` has two methods for publication:
+//! 1. `try_publish` and
+//! 2. `publish`
+//!
+//! It is recommended to use `try_publish` and handle the [`RingBufferFull`] error as appropriate in
+//! the application.
+//!
+//! Note, that a [`RingBufferFull`] error indicates that the consumer logic cannot keep up with the
+//! data ingestion rate and that latency is increasing. Therefore, the safe route is to panic the
+//! application instead of sending latent data out. (Of course appropriate action should be taken to
+//! make e.g. prices indicative in a price engine or cancel all open orders in a trading
+//! application before panicking.)
 
 use std::process;
 use crossbeam_utils::CachePadded;
@@ -42,11 +55,11 @@ impl ProducerBarrier for SingleProducerBarrier {
 pub struct Producer<E> {
 	disruptor: *mut Disruptor<E, SingleProducerBarrier>,
 	consumer: Consumer,
-	/// Current sequence about to be published.
+	/// Next sequence to be published.
 	sequence: i64,
 	/// Highest sequence available for publication because the Consumers are "enough" behind
 	/// to not interfere.
-	available_publisher_sequence: i64,
+	sequence_clear_of_consumers: i64,
 }
 
 unsafe impl<E: Send> Send for Producer<E> {}
@@ -62,13 +75,13 @@ impl<E> Producer<E> {
 	pub(crate) fn new(
 		disruptor: *mut Disruptor<E, SingleProducerBarrier>,
 		consumer: Consumer,
-		available_publisher_sequence: i64
+		sequence_clear_of_consumers: i64
 	) -> Self {
 		Producer {
 			disruptor,
 			consumer,
 			sequence: 0,
-			available_publisher_sequence,
+			sequence_clear_of_consumers,
 		}
 	}
 
@@ -141,7 +154,7 @@ impl<E> Producer<E> {
 		let disruptor = self.disruptor();
 		let sequence  = self.sequence;
 
-		if self.available_publisher_sequence < sequence {
+		if self.sequence_clear_of_consumers < sequence {
 			// We have to check where the consumer is in case we're about to
 			// publish into the slot currently being read by the consumer.
 			// (Consumer is an entire ring buffer behind the producer).
@@ -153,7 +166,7 @@ impl<E> Producer<E> {
 
 			// We can now continue until we get right behind the consumer's current
 			// position without checking where it actually is.
-			self.available_publisher_sequence = consumer_sequence + disruptor.ring_buffer_size - 1;
+			self.sequence_clear_of_consumers = consumer_sequence + disruptor.ring_buffer_size - 1;
 		}
 
 		Ok(sequence)
@@ -300,14 +313,16 @@ struct SharedProducer {
 ///
 /// See also [`Producer`] for single-threaded publication.
 pub struct MultiProducer<E> {
-	disruptor:                    *mut Disruptor<E, MultiProducerBarrier>,
-	shared_producer:              *mut SharedProducer,
-	// Next sequence number to publish.
-	sequence:                     i64,
-	available_publisher_sequence: i64,
+	disruptor:                   *mut Disruptor<E, MultiProducerBarrier>,
+	shared_producer:             *mut SharedProducer,
+	/// Next sequence number for the MultiProducer to publish.
+	claimed_sequence:            i64,
+	/// Highest sequence available for publication because the Consumers are "enough" behind
+	/// to not interfere.
+	sequence_clear_of_consumers: i64,
 }
 
-// Indicates no sequence number has been claimed (yet).
+/// Indicates no sequence number has been claimed (yet).
 const NONE: i64 = -1;
 
 unsafe impl<E: Send> Send for MultiProducer<E> {}
@@ -325,13 +340,13 @@ impl<E> Clone for MultiProducer<E> {
 		}
 
 		// Known to be available initially as consumers start at index 0.
-		let available_publisher_sequence = unsafe { (*self.disruptor).ring_buffer_size - 1 };
+		let sequence_clear_of_consumers = unsafe { (*self.disruptor).ring_buffer_size - 1 };
 
 		MultiProducer {
-			disruptor:       self.disruptor,
-			shared_producer: self.shared_producer,
-			sequence:        NONE,
-			available_publisher_sequence
+			disruptor:        self.disruptor,
+			shared_producer:  self.shared_producer,
+			claimed_sequence: NONE,
+			sequence_clear_of_consumers
 		}
 	}
 }
@@ -367,12 +382,12 @@ impl<E> MultiProducer<E> {
 			)
 		);
 		// Known to be available initially as consumers start at index 0.
-		let available_publisher_sequence = unsafe { (*disruptor).ring_buffer_size - 1 };
+		let sequence_clear_of_consumers = unsafe { (*disruptor).ring_buffer_size - 1 };
 		MultiProducer {
 			disruptor,
 			shared_producer,
-			sequence: NONE,
-			available_publisher_sequence
+			claimed_sequence: NONE,
+			sequence_clear_of_consumers
 		}
 	}
 
@@ -391,28 +406,31 @@ impl<E> MultiProducer<E> {
 		let disruptor = self.disruptor();
 		// We get the last produced sequence number and increment it for the next publisher.
 		// `sequence` is now exclusive for this producer.
-		// We need to store it, because ring buffer could be full (and the producer barrier has
-		// already increased its publication counter).
-		if self.sequence == NONE {
-			let next_sequence = disruptor.producer_barrier.next();
-			self.sequence     = next_sequence;
+		// We need to store it, because the ring buffer could be full (and the producer barrier has
+		// already increased its publication counter so we *must* eventually use it for publication).
+		if self.claimed_sequence == NONE {
+			let next_sequence     = disruptor.producer_barrier.next();
+			self.claimed_sequence = next_sequence;
 		}
 		let disruptor = self.disruptor();
-		let sequence  = self.sequence;
+		let sequence  = self.claimed_sequence;
 
-		if self.available_publisher_sequence < sequence {
+		if self.sequence_clear_of_consumers < sequence {
 			// We have to check where the consumer is in case we're about to
 			// publish into the slot currently being read by the consumer.
 			// (Consumer is an entire ring buffer behind the producer).
 			let wrap_point        = disruptor.wrap_point(sequence);
 			let consumer_sequence = disruptor.consumer_barrier.load(Ordering::Acquire);
+			// `<=` because a producer can claim a sequence number that a consumer is still using
+			// before the wrap_point. (Compare with the single-threaded Producer that cannot claim
+			// a sequence number beyond the wrap_point).
 			if consumer_sequence <= wrap_point {
 				return Err(RingBufferFull);
 			}
 
 			// We can now continue until we get right behind the consumer's current
 			// position without checking where it actually is.
-			self.available_publisher_sequence = consumer_sequence + disruptor.ring_buffer_size - 1;
+			self.sequence_clear_of_consumers = consumer_sequence + disruptor.ring_buffer_size - 1;
 		}
 
 		Ok(sequence)
@@ -421,7 +439,7 @@ impl<E> MultiProducer<E> {
 	/// Precondition: `sequence` is available for publication.
 	#[inline]
 	fn apply_update<F>(&mut self, update: F) -> Result<i64, RingBufferFull> where F: FnOnce(&mut E) {
-		let sequence = self.sequence;
+		let sequence  = self.claimed_sequence;
 		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
 		// can now update the data.
 		let disruptor = self.disruptor();
@@ -432,7 +450,7 @@ impl<E> MultiProducer<E> {
 		// Make publication available by publishing `sequence`.
 		disruptor.producer_barrier.publish(sequence);
 		// sequence is now used - replace it with None.
-		self.sequence = NONE;
+		self.claimed_sequence = NONE;
 		Ok(sequence)
 	}
 

@@ -62,6 +62,7 @@ mod consumer;
 
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use core_affinity::CoreId;
 use crossbeam_utils::CachePadded;
 use crate::consumer::Consumer;
 use crate::producer::{ProducerBarrier, Producer, SingleProducerBarrier, MultiProducer, MultiProducerBarrier};
@@ -78,13 +79,15 @@ pub(crate) struct Disruptor<E, P: ProducerBarrier> {
 
 /// Builder used for configuring and constructing a Disruptor.
 pub struct Builder<E, P, W> {
-	ring_buffer:      Box<[Slot<E>]>,
-	consumer_barrier: CachePadded<AtomicI64>,
-	shutting_down:    AtomicBool,
-	index_mask:       i64,
-	ring_buffer_size: i64,
-	processor:        P,
-	wait_strategy:    W
+	ring_buffer:           Box<[Slot<E>]>,
+	consumer_barrier:      CachePadded<AtomicI64>,
+	shutting_down:         AtomicBool,
+	index_mask:            i64,
+	ring_buffer_size:      i64,
+	processor:             P,
+	processor_affinity:    Option<CoreId>,
+	processor_thread_name: &'static str,
+	wait_strategy:         W
 }
 
 fn is_pow_of_2(num: usize) -> bool {
@@ -157,12 +160,38 @@ impl<E, P, W> Builder<E, P, W> where
 			index_mask,
 			ring_buffer_size,
 			processor,
+			processor_affinity: None,
+			processor_thread_name: "processor",
 			wait_strategy
 		}
 	}
 
+	/// Set the core that the processor thread should be pinned to.
+	/// Note, core numbering typically starts with id=0.
+	///
+	/// # Panics
+	///
+	/// Panics if the core with `id` is not available.
+	pub fn pin_processor_to_core(mut self, id: usize) -> Self {
+		let available: Vec<usize> = core_affinity::get_core_ids().unwrap().iter()
+			.map(|core_id| core_id.id)
+			.collect();
+
+		if !available.contains(&id) {
+			panic!("No core with ID={} is available.", id);
+		}
+
+		self.processor_affinity = Some(CoreId { id });
+		self
+	}
+
 	/// Creates the Disruptor and returns a [`Producer<E>`] used for publishing into the Disruptor
 	/// (single thread).
+	///
+	/// # Panics
+	///
+	/// If thread affinity has been set for the processor thread and it cannot be pinned by the
+	/// operating system.
 	pub fn create_with_single_producer(self) -> Producer<E> {
 		let producer_barrier = SingleProducerBarrier::new();
 		let disruptor        = Box::into_raw(
@@ -179,8 +208,13 @@ impl<E, P, W> Builder<E, P, W> where
 		);
 
 		let wrapper  = DisruptorWrapper(disruptor);
-		let receiver = Consumer::new(wrapper, self.processor, self.wait_strategy);
-		Producer::new(disruptor, receiver, self.ring_buffer_size - 1)
+		let consumer = Consumer::new(
+			wrapper,
+			self.processor_thread_name,
+			self.processor,
+			self.processor_affinity,
+			self.wait_strategy);
+		Producer::new(disruptor, consumer, self.ring_buffer_size - 1)
 	}
 
 	/// Creates the Disruptor and returns a [`MultiProducer<E>`] used for publishing into the Disruptor
@@ -211,6 +245,11 @@ impl<E, P, W> Builder<E, P, W> where
 	///     });
 	/// });
 	/// ```
+	///
+	/// # Panics
+	///
+	/// If thread affinity has been set for the processor thread and it cannot be pinned by the
+	/// operating system.
 	pub fn create_with_multi_producer(self) -> MultiProducer<E> {
 		let producer_barrier = MultiProducerBarrier::new(self.ring_buffer_size as usize);
 		let disruptor        = Box::into_raw(
@@ -227,7 +266,12 @@ impl<E, P, W> Builder<E, P, W> where
 		);
 
 		let wrapper  = DisruptorWrapper(disruptor);
-		let consumer = Consumer::new(wrapper, self.processor, self.wait_strategy);
+		let consumer = Consumer::new(
+			wrapper,
+			self.processor_thread_name,
+			self.processor,
+			self.processor_affinity,
+			self.wait_strategy);
 		MultiProducer::new(disruptor, consumer)
 	}
 }

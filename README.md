@@ -60,6 +60,7 @@ fn main() {
 - [x] Low-latency.
 - [x] Busy-spin wait strategies.
 - [x] Batch consumption of events.
+- [x] Thread affinity can be set for the event processor thread.
 
 # Design Choices
 
@@ -81,7 +82,7 @@ that neither of the above libraries support (at the time of writing).
 
 # Roadmap
 
-1. Support for setting thread affinity on event processor threads.
-2. Support for batch publication.
+1. Support for batch publication.
+2. Verify correctness with Miri.
 3. Write benchmarks comparing this library to e.g. Crossbeam and the standard Rust channels.
 4. Support for multiple consumers/event processor threads including interdependencies.

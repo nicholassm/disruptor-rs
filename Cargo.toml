@@ -13,3 +13,4 @@ keywords      = ["disruptor", "ringbuffer"]
 
 [dependencies]
 crossbeam-utils = "0.8"
+core_affinity   = "0.8.0"

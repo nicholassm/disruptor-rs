@@ -74,12 +74,12 @@ pub(crate) struct Disruptor<E, P: ProducerBarrier> {
 	shutting_down:    AtomicBool,
 	index_mask:       i64,
 	ring_buffer_size: i64,
-	ring_buffer:      Box<[Slot<E>]>
+	ring_buffer:      Box<[UnsafeCell<E>]>
 }
 
 /// Builder used for configuring and constructing a Disruptor.
 pub struct Builder<E, P, W> {
-	ring_buffer:           Box<[Slot<E>]>,
+	ring_buffer:           Box<[UnsafeCell<E>]>,
 	consumer_barrier:      CachePadded<AtomicI64>,
 	shutting_down:         AtomicBool,
 	index_mask:            i64,
@@ -144,9 +144,9 @@ impl<E, P, W> Builder<E, P, W> where
 	{
 		if !is_pow_of_2(size) { panic!("Size must be power of 2.") }
 
-		let ring_buffer: Box<[Slot<E>]> = (0..size)
+		let ring_buffer: Box<[UnsafeCell<E>]> = (0..size)
 			.map(|_i| {
-				Slot { event: UnsafeCell::new(event_factory()) }
+				UnsafeCell::new(event_factory())
 			}).collect();
 		let index_mask       = (size - 1) as i64;
 		let ring_buffer_size = size as i64;
@@ -276,10 +276,6 @@ impl<E, P, W> Builder<E, P, W> where
 	}
 }
 
-struct Slot<E> {
-	event: UnsafeCell<E>
-}
-
 /// Needed for providing a [`Disruptor`] reference to the Consumer thread.
 struct DisruptorWrapper<T, P: ProducerBarrier> (*mut Disruptor<T, P>);
 
@@ -314,7 +310,7 @@ impl<E, P: ProducerBarrier> Disruptor<E, P> {
 	#[inline]
 	fn get(&self, sequence: i64) -> *mut E {
 		let index = (sequence & self.index_mask) as usize;
-		self.ring_buffer[index].event.get()
+		self.ring_buffer[index].get()
 	}
 }
 

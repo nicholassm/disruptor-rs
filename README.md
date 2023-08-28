@@ -82,7 +82,8 @@ that neither of the above libraries support (at the time of writing).
 
 # Roadmap
 
-1. Support for batch publication.
-2. Verify correctness with Miri.
-3. Write benchmarks comparing this library to e.g. Crossbeam and the standard Rust channels.
-4. Support for multiple consumers/event processor threads including interdependencies.
+1. Add a Sleeping Wait Strategy.
+2. Support for batch publication.
+3. Verify correctness with Miri.
+4. Write benchmarks comparing this library to e.g. Crossbeam and the standard Rust channels.
+5. Support for multiple consumers/event processor threads including interdependencies.

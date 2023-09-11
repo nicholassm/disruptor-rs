@@ -197,7 +197,7 @@ impl<E> Drop for Producer<E> {
 		self.disruptor().shut_down();
 		self.consumer.join();
 
-		// Safety: Both publishers and receivers are done accessing the Disruptor.
+		// SAFETY: Both publishers and receivers are done accessing the Disruptor.
 		unsafe {
 			drop(Box::from_raw(self.disruptor));
 		}
@@ -357,7 +357,7 @@ impl<E> Drop for MultiProducer<E> {
 		if old_count == 1 {
 			self.disruptor().shut_down();
 
-			// Safety: Both producers and consumers are done accessing the Disruptor and
+			// SAFETY: Both producers and consumers are done accessing the Disruptor and
 			// the shared_producer.
 			unsafe {
 				(*self.shared_producer).consumer.join();

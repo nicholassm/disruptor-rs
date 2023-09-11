@@ -145,9 +145,8 @@ impl<E, P, W> Builder<E, P, W> where
 		if !is_pow_of_2(size) { panic!("Size must be power of 2.") }
 
 		let ring_buffer: Box<[UnsafeCell<E>]> = (0..size)
-			.map(|_i| {
-				UnsafeCell::new(event_factory())
-			}).collect();
+			.map(|_i| UnsafeCell::new(event_factory()) )
+			.collect();
 		let index_mask       = (size - 1) as i64;
 		let ring_buffer_size = size as i64;
 		let consumer_barrier = CachePadded::new(AtomicI64::new(0));
@@ -343,9 +342,9 @@ mod tests {
 
 	#[test]
 	fn test_single_producer() {
-		let factory     = || { Event { price: 0, size: 0, data: Data { data: "".to_owned() } }};
-		let (s, r)      = mpsc::channel();
-		let processor   = move |e: &Event, _, _| {
+		let factory   = || { Event { price: 0, size: 0, data: Data { data: "".to_owned() } }};
+		let (s, r)    = mpsc::channel();
+		let processor = move |e: &Event, _, _| {
 			s.send(e.price*e.size).expect("Should be able to send.");
 		};
 
@@ -354,9 +353,9 @@ mod tests {
 			s.spawn(move || {
 				for i in 0..10 {
 					producer.publish(|e| {
-						e.price    = i as i64;
-						e.size     = i as i64;
-						e.data     = Data { data: i.to_string() }
+						e.price = i as i64;
+						e.size  = i as i64;
+						e.data  = Data { data: i.to_string() }
 					});
 				}
 			});
@@ -378,21 +377,22 @@ mod tests {
 		let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
 		let processor = move |e: &Event, _, _| {
 			producer.publish(|e2| {
-				e2.price    = e.price*2;
-				e2.size     = e.size*2;
-				e2.data     = Data { data: e.data.data.clone() };
+				e2.price = e.price*2;
+				e2.size  = e.size*2;
+				e2.data  = Data { data: e.data.data.clone() };
 			});
 		};
 
 		// First Disruptor.
-		let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
+		let mut producer = Builder::new(8, factory, processor, BusySpin)
+			.create_with_single_producer();
 		thread::scope(|s| {
 			s.spawn(move || {
 				for i in 0..10 {
 					producer.publish(|e| {
-						e.price    = i as i64;
-						e.size     = i as i64;
-						e.data     = Data { data: i.to_string() }
+						e.price = i as i64;
+						e.size  = i as i64;
+						e.data  = Data { data: i.to_string() }
 					});
 				}
 			});

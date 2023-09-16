@@ -186,11 +186,6 @@ impl<E, P, W> Builder<E, P, W> where
 
 	/// Creates the Disruptor and returns a [`Producer<E>`] used for publishing into the Disruptor
 	/// (single thread).
-	///
-	/// # Panics
-	///
-	/// If thread affinity has been set for the processor thread and it cannot be pinned by the
-	/// operating system.
 	pub fn create_with_single_producer(self) -> Producer<E> {
 		let producer_barrier = SingleProducerBarrier::new();
 		let disruptor        = Box::into_raw(
@@ -244,11 +239,6 @@ impl<E, P, W> Builder<E, P, W> where
 	///     });
 	/// });
 	/// ```
-	///
-	/// # Panics
-	///
-	/// If thread affinity has been set for the processor thread and it cannot be pinned by the
-	/// operating system.
 	pub fn create_with_multi_producer(self) -> MultiProducer<E> {
 		let producer_barrier = MultiProducerBarrier::new(self.ring_buffer_size as usize);
 		let disruptor        = Box::into_raw(
@@ -348,7 +338,9 @@ mod tests {
 			s.send(e.price*e.size).expect("Should be able to send.");
 		};
 
-		let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
+		let mut producer = Builder::new(8, factory, processor, BusySpin)
+			.pin_processor_to_core(1)
+			.create_with_single_producer();
 		thread::scope(|s| {
 			s.spawn(move || {
 				for i in 0..10 {
@@ -374,7 +366,8 @@ mod tests {
 		};
 
 		// Last Disruptor.
-		let mut producer = Builder::new(8, factory, processor, BusySpin).create_with_single_producer();
+		let mut producer = Builder::new(8, factory, processor, BusySpin)
+			.create_with_single_producer();
 		let processor = move |e: &Event, _, _| {
 			producer.publish(|e2| {
 				e2.price = e.price*2;
@@ -412,7 +405,8 @@ mod tests {
 			s.send(e.price).expect("Should be able to send.");
 		};
 
-		let mut producer1 = Builder::new(8, factory, processor, BusySpinWithSpinLoopHint).create_with_multi_producer();
+		let mut producer1 = Builder::new(8, factory, processor, BusySpinWithSpinLoopHint)
+			.create_with_multi_producer();
 		let mut producer2 = producer1.clone();
 
 		thread::scope(|s| {

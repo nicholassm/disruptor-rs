@@ -80,7 +80,7 @@ impl Consumer {
 
 		let set_affinity_result = receiver.recv().expect("Should receive affinity result");
 		if let Err(affinity_error) = set_affinity_result {
-			panic!("{}", affinity_error.0);
+			eprintln!("Thread affinity error: {}", affinity_error.0);
 		}
 
 		Consumer { join_handle: Some(join_handle) }

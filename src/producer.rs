@@ -215,7 +215,7 @@ impl MultiProducerBarrier {
 	pub(crate) fn new(size: usize) -> MultiProducerBarrier {
 		let cursor      = CachePadded::new(AtomicI64::new(-1));
 		let available   = (0..size).map(|_i| { AtomicI32::new(-1) }).collect();
-		let index_mask  = (size - 1) as usize;
+		let index_mask  = size - 1;
 		let index_shift = Self::log2(size);
 
 		MultiProducerBarrier { cursor, available, index_mask, index_shift }

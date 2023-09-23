@@ -1,3 +1,6 @@
+![Crates.io](https://img.shields.io/crates/v/disruptor)
+![Crates.io](https://img.shields.io/crates/d/disruptor)
+
 # Disruptor
 
 This library is a low latency, inter-thread communication library written in Rust.

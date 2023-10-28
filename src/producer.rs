@@ -326,7 +326,6 @@ pub struct MultiProducer<E> {
 const NONE: i64 = -1;
 
 unsafe impl<E: Send> Send for MultiProducer<E> {}
-unsafe impl<E: Send> Sync for MultiProducer<E> {}
 
 impl<E> Clone for MultiProducer<E> {
 	fn clone(&self) -> Self {

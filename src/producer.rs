@@ -22,8 +22,14 @@ use crate::consumer::Consumer;
 use crate::Disruptor;
 
 pub(crate) trait ProducerBarrier {
+	/// Publishes the sequence number that is now available for being read by consumers.
+	/// (The sequence number is stored with [`Ordering::Release`] semantics.)
 	fn publish(&self, sequence: i64);
-	fn get_highest_available(&self, lower_bound: i64) -> i64;
+	/// Gets the highest available sequence number with relaxed memory ordering.
+	///
+	/// Note, to establish proper happens-before relationships (and thus proper synchronization),
+	/// the caller must issue a [`std::sync::atomic::fence`] with [`Ordering::Acquire`].
+	fn get_highest_available_relaxed(&self, lower_bound: i64) -> i64;
 }
 
 pub(crate) struct SingleProducerBarrier {
@@ -44,8 +50,8 @@ impl ProducerBarrier for SingleProducerBarrier {
 	}
 
 	#[inline]
-	fn get_highest_available(&self, _lower_bound: i64) -> i64 {
-		self.cursor.load(Ordering::Acquire)
+	fn get_highest_available_relaxed(&self, _lower_bound: i64) -> i64 {
+		self.cursor.load(Ordering::Relaxed)
 	}
 }
 
@@ -252,7 +258,7 @@ impl MultiProducerBarrier {
 	fn is_published(&self, sequence: i64) -> bool {
 		let availability      = self.get_availability(sequence);
 		let availability_flag = self.calculate_availability_flag(sequence);
-		availability.load(Ordering::Acquire) == availability_flag
+		availability.load(Ordering::Relaxed) == availability_flag
 	}
 }
 
@@ -267,7 +273,7 @@ impl ProducerBarrier for MultiProducerBarrier {
 	/// Returns highest available sequence number for consumption.
 	/// `lower_bound - 1` must have been previously available.
 	#[inline]
-	fn get_highest_available(&self, lower_bound: i64) -> i64 {
+	fn get_highest_available_relaxed(&self, lower_bound: i64) -> i64 {
 		let mut highest_available = lower_bound;
 		loop {
 			if ! self.is_published(highest_available) {

@@ -287,8 +287,8 @@ impl<E, P: ProducerBarrier> Disruptor<E, P> {
 	}
 
 	#[inline]
-	fn get_highest_published(&self, lower_bound: i64) -> i64 {
-		self.producer_barrier.get_highest_available(lower_bound)
+	fn get_highest_published_relaxed(&self, lower_bound: i64) -> i64 {
+		self.producer_barrier.get_highest_available_relaxed(lower_bound)
 	}
 
 	#[inline]

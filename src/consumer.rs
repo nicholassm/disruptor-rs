@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{fence, Ordering};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::thread::JoinHandle;
@@ -52,16 +52,17 @@ impl Consumer {
 			let disruptor    = wrapper.unwrap();
 			let mut sequence = 0i64;
 			loop {
-				let mut available = disruptor.get_highest_published(sequence);
+				let mut available = disruptor.get_highest_published_relaxed(sequence);
 
 				while available < sequence {
 					if disruptor.is_shutting_down() {
 						// Recheck that no new published events are present.
-						if disruptor.get_highest_published(sequence) < sequence { return }
+						if disruptor.get_highest_published_relaxed(sequence) < sequence { return }
 					}
 					wait_strategy.wait_for(sequence);
-					available = disruptor.get_highest_published(sequence);
+					available = disruptor.get_highest_published_relaxed(sequence);
 				}
+				fence(Ordering::Acquire);
 
 				while available >= sequence {
 					let end_of_batch = available == sequence;

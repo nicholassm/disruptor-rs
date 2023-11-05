@@ -67,7 +67,7 @@ The latencies below are the median latency per element.
 
 ## No Pause Between Bursts
 
-Latency:
+*Latency:*
 
 |  Burst Size | Crossbeam | Disruptor | Improvement |
 |------------:|----------:|----------:|------------:|
@@ -77,7 +77,7 @@ Latency:
 |          50 |     41 ns |     32 ns |         22% |
 |         100 |     37 ns |     32 ns |         14% |
 
-Throughput:
+*Throughput:*
 
 |  Burst Size |  Crossbeam |   Disruptor | Improvement |
 |------------:|-----------:|------------:|------------:|
@@ -89,7 +89,7 @@ Throughput:
 
 ## 1 ms Pause Between Bursts
 
-Latency:
+*Latency:*
 
 |  Burst Size | Crossbeam |  Disruptor | Improvement |
 |------------:|----------:|-----------:|------------:|
@@ -99,7 +99,7 @@ Latency:
 |          50 |     41 ns |      33 ns |         20% |
 |         100 |     37 ns |      32 ns |         14% |
 
-Throughput:
+*Throughput:*
 
 |  Burst Size |  Crossbeam | Disruptor | Improvement |
 |------------:|-----------:|----------:|------------:|
@@ -111,7 +111,7 @@ Throughput:
 
 ## 10 ms Pause Between Bursts
 
-Latency:
+*Latency:*
 
 |  Burst Size | Crossbeam | Disruptor | Improvement |
 |------------:|----------:|----------:|------------:|
@@ -121,7 +121,7 @@ Latency:
 |          50 |     44 ns |     30 ns |         32% |
 |         100 |     38 ns |     34 ns |         11% |
 
-Throughput:
+*Throughput:*
 
 |  Burst Size | Crossbeam | Disruptor | Improvement |
 |------------:|----------:|----------:|------------:|

@@ -9,7 +9,7 @@ use disruptor::{Builder, BusySpin};
 
 const DATA_STRUCTURE_SIZE: usize = 64;
 const BURST_SIZES: [u64; 5]      = [1, 5, 10, 50, 100];
-const GAPS_MS: [u64; 3]          = [0, 1, 10];
+const PAUSES_MS: [u64; 3]        = [0, 1, 10];
 
 struct Event {
 	data: i64
@@ -29,9 +29,9 @@ pub fn spsc_benchmark(c: &mut Criterion) {
 		// Base: Benchmark overhead of measurement logic.
 		base(&mut group, burst_size);
 
-		for gap in GAPS_MS.into_iter() {
-			let inputs = (burst_size, gap);
-			let param  = format!("burst: {}, gap: {} ms", burst_size, gap);
+		for pause_ms in PAUSES_MS.into_iter() {
+			let inputs = (burst_size, pause_ms);
+			let param  = format!("burst: {}, pause: {} ms", burst_size, pause_ms);
 
 			crossbeam(&mut group, inputs, &param);
 			disruptor(&mut group, inputs, &param);
@@ -73,8 +73,8 @@ fn crossbeam(group: &mut BenchmarkGroup<WallTime>, inputs: (u64, u64), param: &s
 	};
 	let mut data     = black_box(0);
 	let benchmark_id = BenchmarkId::new("Crossbeam", &param);
-	group.bench_with_input(benchmark_id, &inputs, move |b, (size, gap)| b.iter_custom(|iters| {
-		pause(*gap);
+	group.bench_with_input(benchmark_id, &inputs, move |b, (size, pause_ms)| b.iter_custom(|iters| {
+		pause(*pause_ms);
 		let start = Instant::now();
 		for _ in 0..iters {
 			for _ in 0..*size {
@@ -105,8 +105,8 @@ fn disruptor(group: &mut BenchmarkGroup<WallTime>, inputs: (u64, u64), param: &s
 		.create_with_single_producer();
 	let mut data     = black_box(0);
 	let benchmark_id = BenchmarkId::new("disruptor", &param);
-	group.bench_with_input(benchmark_id, &inputs, move |b, (size, gap) | b.iter_custom(|iters| {
-		pause(*gap);
+	group.bench_with_input(benchmark_id, &inputs, move |b, (size, pause_ms) | b.iter_custom(|iters| {
+		pause(*pause_ms);
 		let start = Instant::now();
 		for _ in 0..iters {
 			for _ in 0..*size {

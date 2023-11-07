@@ -50,6 +50,24 @@ fn main() {
  // as well.
 ```
 
+# Features
+
+- [x] Single Producer Single Consumer (SPSC). See roadmap for MPMC.
+- [x] Multi Producer Single Consumer (MPSC).
+- [x] Low-latency.
+- [x] Busy-spin wait strategies.
+- [x] Batch consumption of events.
+- [x] Thread affinity can be set for the event processor thread.
+
+# Design Choices
+
+Everything in the library is about low-latency and this heavily influences all choices made in this library.
+As an example, you cannot allocate an event and *move* that into the ringbuffer. Instead, events
+are allocated on startup to ensure they are co-located in memory to increase cache coherency.
+(However, you can still allocate a struct on the heap and move ownership to a field in the event on the Ringbuffer.
+As long as you realize that this can add latency, because the struct is allocated by one thread and dropped by another.
+Hence, there's synchronization happening in the allocator.)
+
 # Performance
 
 The SPSC Disruptor variant has been benchmarked and compared to Crossbeam. See the code in the `benches/spsc.rs` file.
@@ -140,23 +158,6 @@ higher throughput and that is why it's able to achieve these results.
 Both libraries greatly improves as the burst size goes up but the Disruptor's performance is more resilient to the
 pauses between bursts which is one of the design goals.
 
-# Features
-
-- [x] Single Producer Single Consumer (SPSC). See roadmap for MPMC.
-- [x] Multi Producer Single Consumer (MPSC).
-- [x] Low-latency.
-- [x] Busy-spin wait strategies.
-- [x] Batch consumption of events.
-- [x] Thread affinity can be set for the event processor thread.
-
-# Design Choices
-
-Everything in the library is about low-latency and this heavily influences all choices made in this library.
-As an example, you cannot allocate an event and *move* that into the ringbuffer. Instead, events
-are allocated on startup to ensure they are co-located in memory to increase cache coherency.
-(However, you can still allocate a struct on the heap and move ownership to a field in the event on the Ringbuffer.
-As long as you realize that this can add latency, because the struct is allocated by one thread and dropped by another.
-Hence, there's synchronization happening in the allocator.)
 
 # Related Work
 

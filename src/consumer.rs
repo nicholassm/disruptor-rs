@@ -3,7 +3,7 @@ use std::sync::mpsc::channel;
 use std::thread;
 use std::thread::JoinHandle;
 use core_affinity::CoreId;
-use crate::DisruptorWrapper;
+use crate::{DisruptorWrapper, Sequence};
 use crate::producer::ProducerBarrier;
 use crate::wait_strategies::WaitStrategy;
 
@@ -32,7 +32,7 @@ impl Consumer {
 		mut processor: F,
 		processor_affinity: Option<CoreId>,
 		wait_strategy: W) -> Consumer
-		where F: Send + FnMut(&E, i64, bool) + 'static,
+		where F: Send + FnMut(&E, Sequence, bool) + 'static,
 		      E: 'static,
 		      W: WaitStrategy + 'static,
 		      P: ProducerBarrier + 'static
@@ -49,8 +49,8 @@ impl Consumer {
 			sender.send(result).expect("Should be able to send.");
 			drop(sender);
 
-			let disruptor    = wrapper.unwrap();
-			let mut sequence = 0i64;
+			let disruptor              = wrapper.unwrap();
+			let mut sequence: Sequence = 0;
 			loop {
 				let mut available = disruptor.get_highest_published_relaxed(sequence);
 

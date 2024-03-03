@@ -15,8 +15,7 @@
 //!
 //! # Examples
 //! ```
-//! use disruptor::Builder;
-//! use disruptor::BusySpin;
+//! use disruptor::{Builder, BusySpin, Sequence};
 //!
 //! // The data entity on the ring buffer.
 //! struct Event {
@@ -28,7 +27,7 @@
 //!
 //! // Define a closure for processing events. A thread, controlled by the disruptor, will run this
 //! // processor closure each time an event is published.
-//! let processor = |e: &Event, sequence: i64, end_of_batch: bool| {
+//! let processor = |e: &Event, sequence: Sequence, end_of_batch: bool| {
 //!     // Process the Event `e` published at `sequence`.
 //!     // If `end_of_batch` is false, you can batch up events until it's invoked with
 //!     // `end_of_batch` being true.
@@ -68,6 +67,9 @@ use crate::consumer::Consumer;
 use crate::producer::{ProducerBarrier, Producer, SingleProducerBarrier, MultiProducer, MultiProducerBarrier};
 use crate::wait_strategies::WaitStrategy;
 
+/// The type of Sequence numbers in the Ring Buffer.
+pub type Sequence = i64;
+
 pub(crate) struct Disruptor<E, P: ProducerBarrier> {
 	producer_barrier: P,
 	consumer_barrier: CachePadded<AtomicI64>,
@@ -96,7 +98,7 @@ fn is_pow_of_2(num: usize) -> bool {
 
 impl<E, P, W> Builder<E, P, W> where
 		E: 'static,
-		P: Send + FnMut(&E, i64, bool) + 'static,
+		P: Send + FnMut(&E, Sequence, bool) + 'static,
 		W: WaitStrategy + 'static {
 
 	/// Creates a Builder for a Disruptor.
@@ -118,6 +120,7 @@ impl<E, P, W> Builder<E, P, W> where
 	///
 	/// ```
 	/// use disruptor::wait_strategies::BusySpin;
+	///# use disruptor::Sequence;
 	///
 	/// // The data entity on the ring buffer.
 	/// struct Event {
@@ -129,7 +132,7 @@ impl<E, P, W> Builder<E, P, W> where
 	///
 	/// // Define a closure for processing events. A thread, controlled by the disruptor, will run
 	/// // this processor each time an event is published.
-	/// let processor = |e: &Event, sequence: i64, end_of_batch: bool| {
+	/// let processor = |e: &Event, sequence: Sequence, end_of_batch: bool| {
 	///     // Process e.
 	/// };
 	///
@@ -287,17 +290,17 @@ impl<E, P: ProducerBarrier> Disruptor<E, P> {
 	}
 
 	#[inline]
-	fn get_highest_published_relaxed(&self, lower_bound: i64) -> i64 {
+	fn get_highest_published_relaxed(&self, lower_bound: Sequence) -> Sequence {
 		self.producer_barrier.get_highest_available_relaxed(lower_bound)
 	}
 
 	#[inline]
-	fn wrap_point(&self, sequence: i64) -> i64 {
+	fn wrap_point(&self, sequence: Sequence) -> Sequence {
 		sequence - self.ring_buffer_size
 	}
 
 	#[inline]
-	fn get(&self, sequence: i64) -> *mut E {
+	fn get(&self, sequence: Sequence) -> *mut E {
 		let index = (sequence & self.index_mask) as usize;
 		self.ring_buffer[index].get()
 	}

@@ -19,17 +19,17 @@ use std::process;
 use crossbeam_utils::CachePadded;
 use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
 use crate::consumer::Consumer;
-use crate::Disruptor;
+use crate::{Disruptor, Sequence};
 
 pub(crate) trait ProducerBarrier {
 	/// Publishes the sequence number that is now available for being read by consumers.
 	/// (The sequence number is stored with [`Ordering::Release`] semantics.)
-	fn publish(&self, sequence: i64);
+	fn publish(&self, sequence: Sequence);
 	/// Gets the highest available sequence number with relaxed memory ordering.
 	///
 	/// Note, to establish proper happens-before relationships (and thus proper synchronization),
 	/// the caller must issue a [`std::sync::atomic::fence`] with [`Ordering::Acquire`].
-	fn get_highest_available_relaxed(&self, lower_bound: i64) -> i64;
+	fn get_highest_available_relaxed(&self, lower_bound: Sequence) -> Sequence;
 }
 
 pub(crate) struct SingleProducerBarrier {
@@ -45,12 +45,12 @@ impl SingleProducerBarrier {
 
 impl ProducerBarrier for SingleProducerBarrier {
 	#[inline]
-	fn publish(&self, sequence: i64) {
+	fn publish(&self, sequence: Sequence) {
 		self.cursor.store(sequence, Ordering::Release);
 	}
 
 	#[inline]
-	fn get_highest_available_relaxed(&self, _lower_bound: i64) -> i64 {
+	fn get_highest_available_relaxed(&self, _lower_bound: Sequence) -> Sequence {
 		self.cursor.load(Ordering::Relaxed)
 	}
 }
@@ -62,10 +62,10 @@ pub struct Producer<E> {
 	disruptor: *mut Disruptor<E, SingleProducerBarrier>,
 	consumer: Consumer,
 	/// Next sequence to be published.
-	sequence: i64,
+	sequence: Sequence,
 	/// Highest sequence available for publication because the Consumers are "enough" behind
 	/// to not interfere.
-	sequence_clear_of_consumers: i64,
+	sequence_clear_of_consumers: Sequence,
 }
 
 unsafe impl<E: Send> Send for Producer<E> {}
@@ -81,7 +81,7 @@ impl<E> Producer<E> {
 	pub(crate) fn new(
 		disruptor: *mut Disruptor<E, SingleProducerBarrier>,
 		consumer: Consumer,
-		sequence_clear_of_consumers: i64
+		sequence_clear_of_consumers: Sequence
 	) -> Self {
 		Producer {
 			disruptor,
@@ -123,7 +123,7 @@ impl<E> Producer<E> {
 	///
 	/// See also [`Self::publish`].
 	#[inline]
-	pub fn try_publish<F>(&mut self, update: F) -> Result<i64, RingBufferFull> where F: FnOnce(&mut E) {
+	pub fn try_publish<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull> where F: FnOnce(&mut E) {
 		self.next_sequence()?;
 		self.apply_update(update)
 	}
@@ -135,8 +135,7 @@ impl<E> Producer<E> {
 	/// # Examples
 	///
 	/// ```
-	///# use disruptor::Builder;
-	///# use disruptor::BusySpin;
+	///# use disruptor::{Builder, BusySpin, Sequence};
 	///#
 	/// // The example data entity on the ring buffer.
 	/// struct Event {
@@ -156,7 +155,7 @@ impl<E> Producer<E> {
 	}
 
 	#[inline]
-	fn next_sequence(&mut self) -> Result<i64, RingBufferFull> {
+	fn next_sequence(&mut self) -> Result<Sequence, RingBufferFull> {
 		let disruptor = self.disruptor();
 		let sequence  = self.sequence;
 
@@ -180,7 +179,7 @@ impl<E> Producer<E> {
 
 	/// Precondition: `sequence` is available for publication.
 	#[inline]
-	fn apply_update<F>(&mut self, update: F) -> Result<i64, RingBufferFull> where F: FnOnce(&mut E) {
+	fn apply_update<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull> where F: FnOnce(&mut E) {
 		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
 		// can now update the data.
 		let sequence  = self.sequence;
@@ -232,22 +231,22 @@ impl MultiProducerBarrier {
 	}
 
 	#[inline]
-	fn next(&self) -> i64 {
+	fn next(&self) -> Sequence {
 		self.cursor.fetch_add(1, Ordering::AcqRel) + 1
 	}
 
 	#[inline]
-	fn calculate_availability_index(&self, sequence: i64) -> usize {
+	fn calculate_availability_index(&self, sequence: Sequence) -> usize {
 		sequence as usize & self.index_mask
 	}
 
 	#[inline]
-	fn calculate_availability_flag(&self, sequence: i64) -> i32 {
+	fn calculate_availability_flag(&self, sequence: Sequence) -> i32 {
 		(sequence >> self.index_shift) as i32
 	}
 
 	#[inline]
-	fn get_availability(&self, sequence: i64) -> &AtomicI32 {
+	fn get_availability(&self, sequence: Sequence) -> &AtomicI32 {
 		let availability_index = self.calculate_availability_index(sequence);
 		unsafe {
 			self.available.get_unchecked(availability_index)
@@ -255,7 +254,7 @@ impl MultiProducerBarrier {
 	}
 
 	#[inline]
-	fn is_published(&self, sequence: i64) -> bool {
+	fn is_published(&self, sequence: Sequence) -> bool {
 		let availability      = self.get_availability(sequence);
 		let availability_flag = self.calculate_availability_flag(sequence);
 		availability.load(Ordering::Relaxed) == availability_flag
@@ -264,7 +263,7 @@ impl MultiProducerBarrier {
 
 impl ProducerBarrier for MultiProducerBarrier {
 	#[inline]
-	fn publish(&self, sequence: i64) {
+	fn publish(&self, sequence: Sequence) {
 		let availability      = self.get_availability(sequence);
 		let availability_flag = self.calculate_availability_flag(sequence);
 		availability.store(availability_flag, Ordering::Release);
@@ -273,7 +272,7 @@ impl ProducerBarrier for MultiProducerBarrier {
 	/// Returns highest available sequence number for consumption.
 	/// `lower_bound - 1` must have been previously available.
 	#[inline]
-	fn get_highest_available_relaxed(&self, lower_bound: i64) -> i64 {
+	fn get_highest_available_relaxed(&self, lower_bound: Sequence) -> Sequence {
 		let mut highest_available = lower_bound;
 		loop {
 			if ! self.is_published(highest_available) {
@@ -322,14 +321,14 @@ pub struct MultiProducer<E> {
 	disruptor:                   *mut Disruptor<E, MultiProducerBarrier>,
 	shared_producer:             *mut SharedProducer,
 	/// Next sequence number for the MultiProducer to publish.
-	claimed_sequence:            i64,
+	claimed_sequence:            Sequence,
 	/// Highest sequence available for publication because the Consumers are "enough" behind
 	/// to not interfere.
-	sequence_clear_of_consumers: i64,
+	sequence_clear_of_consumers: Sequence,
 }
 
 /// Indicates no sequence number has been claimed (yet).
-const NONE: i64 = -1;
+const NONE: Sequence = -1;
 
 unsafe impl<E: Send> Send for MultiProducer<E> {}
 
@@ -407,7 +406,7 @@ impl<E> MultiProducer<E> {
 	}
 
 	#[inline]
-	fn claim_next_sequence(&mut self) -> Result<i64, RingBufferFull> {
+	fn claim_next_sequence(&mut self) -> Result<Sequence, RingBufferFull> {
 		let disruptor = self.disruptor();
 		// We get the last produced sequence number and increment it for the next publisher.
 		// `sequence` is now exclusive for this producer.
@@ -443,7 +442,7 @@ impl<E> MultiProducer<E> {
 
 	/// Precondition: `sequence` is available for publication.
 	#[inline]
-	fn apply_update<F>(&mut self, update: F) -> Result<i64, RingBufferFull> where F: FnOnce(&mut E) {
+	fn apply_update<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull> where F: FnOnce(&mut E) {
 		let sequence  = self.claimed_sequence;
 		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
 		// can now update the data.
@@ -486,7 +485,7 @@ impl<E> MultiProducer<E> {
 	///
 	/// See also [`Self::publish`].
 	#[inline]
-	pub fn try_publish<F: FnOnce(&mut E)>(&mut self, update: F) -> Result<i64, RingBufferFull> {
+	pub fn try_publish<F: FnOnce(&mut E)>(&mut self, update: F) -> Result<Sequence, RingBufferFull> {
 		self.claim_next_sequence()?;
 		self.apply_update(update)
 	}

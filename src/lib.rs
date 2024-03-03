@@ -96,11 +96,12 @@ fn is_pow_of_2(num: usize) -> bool {
 	num != 0 && (num & (num - 1) == 0)
 }
 
-impl<E, P, W> Builder<E, P, W> where
-		E: 'static,
-		P: Send + FnMut(&E, Sequence, bool) + 'static,
-		W: WaitStrategy + 'static {
-
+impl<E, P, W> Builder<E, P, W>
+where
+	E: 'static,
+	P: 'static + Send + FnMut(&E, Sequence, bool),
+	W: 'static + WaitStrategy
+{
 	/// Creates a Builder for a Disruptor.
 	///
 	/// The required parameters are:
@@ -142,7 +143,13 @@ impl<E, P, W> Builder<E, P, W> where
 	/// let mut publisher = disruptor::Builder::new(8, factory, processor, BusySpin)
 	///     .create_with_single_producer();
 	/// ```
-	pub fn new<F>(size: usize, mut event_factory: F, processor: P, wait_strategy: W) -> Builder<E, P, W> where
+	pub fn new<F>(
+		size: usize,
+		mut event_factory: F,
+		processor: P,
+	 	wait_strategy: W
+	) -> Builder<E, P, W>
+	where
 		F: FnMut() -> E
 	{
 		if !is_pow_of_2(size) { panic!("Size must be power of 2.") }

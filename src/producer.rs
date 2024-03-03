@@ -82,7 +82,8 @@ impl<E> Producer<E> {
 		disruptor: *mut Disruptor<E, SingleProducerBarrier>,
 		consumer: Consumer,
 		sequence_clear_of_consumers: Sequence
-	) -> Self {
+	) -> Self
+	{
 		Producer {
 			disruptor,
 			consumer,
@@ -179,7 +180,10 @@ impl<E> Producer<E> {
 
 	/// Precondition: `sequence` is available for publication.
 	#[inline]
-	fn apply_update<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull> where F: FnOnce(&mut E) {
+	fn apply_update<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull>
+	where
+		F: FnOnce(&mut E)
+	{
 		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
 		// can now update the data.
 		let sequence  = self.sequence;
@@ -376,7 +380,9 @@ impl<E> Drop for MultiProducer<E> {
 impl<E> MultiProducer<E> {
 	pub(crate) fn new(
 		disruptor: *mut Disruptor<E, MultiProducerBarrier>,
-		consumer: Consumer) -> Self {
+		consumer: Consumer
+	) -> Self
+	{
 		let shared_producer = Box::into_raw(
 			Box::new(
 				SharedProducer {
@@ -442,7 +448,10 @@ impl<E> MultiProducer<E> {
 
 	/// Precondition: `sequence` is available for publication.
 	#[inline]
-	fn apply_update<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull> where F: FnOnce(&mut E) {
+	fn apply_update<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull>
+	where
+		F: FnOnce(&mut E)
+	{
 		let sequence  = self.claimed_sequence;
 		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
 		// can now update the data.

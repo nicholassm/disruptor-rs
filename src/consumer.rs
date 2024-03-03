@@ -31,11 +31,13 @@ impl Consumer {
 		processor_thread_name: &'static str,
 		mut processor: F,
 		processor_affinity: Option<CoreId>,
-		wait_strategy: W) -> Consumer
-		where F: Send + FnMut(&E, Sequence, bool) + 'static,
-		      E: 'static,
-		      W: WaitStrategy + 'static,
-		      P: ProducerBarrier + 'static
+		wait_strategy: W
+	) -> Consumer
+	where
+		F: 'static + Send + FnMut(&E, Sequence, bool),
+		E: 'static,
+		W: 'static + WaitStrategy,
+		P: 'static + ProducerBarrier
 	{
 		// Channel is used for communicating the result of setting the thread affinity.
 		let (sender, receiver)          = channel();

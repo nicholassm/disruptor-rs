@@ -1,92 +1,41 @@
-use std::sync::atomic::{fence, Ordering};
-use std::sync::mpsc::channel;
-use std::thread;
-use std::thread::JoinHandle;
-use core_affinity::CoreId;
-use crate::{DisruptorWrapper, Sequence};
-use crate::producer::ProducerBarrier;
-use crate::wait_strategies::WaitStrategy;
+use std::{sync::Arc, thread::JoinHandle};
+use crate::{barrier::Barrier, cursor::Cursor, Sequence};
 
-pub(crate) struct Consumer {
-	join_handle: Option<JoinHandle<()>>
+pub struct ConsumerBarrier {
+	cursors: Vec<Arc<Cursor>>
 }
 
-/// Error indicating that the thread affinity could not be set.
-struct ThreadAffinityError(String);
+impl ConsumerBarrier {
+	pub(crate) fn add(&mut self, cursor: Arc<Cursor>) {
+		self.cursors.push(cursor);
+	}
+}
 
-fn set_affinity_if_defined(core_affinity: Option<CoreId>, thread_name: &str) -> Result<(), ThreadAffinityError> {
-	if let Some(core_id) = core_affinity {
-		let got_pinned = core_affinity::set_for_current(core_id);
-		if !got_pinned {
-			let error = format!("Could not pin processor thread '{}' to {:?}", thread_name, core_id);
-			return Err(ThreadAffinityError(error));
+impl Barrier for ConsumerBarrier {
+	fn new(_size: usize) -> Self {
+		Self {
+			cursors: vec![]
 		}
 	}
-	Ok(())
+
+	/// Gets the available `Sequence` of the slowest consumer.
+	fn get_relaxed(&self, _lower_bound: Sequence) -> Sequence {
+		self.cursors.iter().fold(i64::MAX, |min_sequence, cursor| {
+			let sequence = cursor.relaxed_value();
+			std::cmp::min(sequence, min_sequence)
+		})
+	}
+}
+
+pub(crate) struct Consumer {
+	join_handle: Option<JoinHandle<()>>,
 }
 
 impl Consumer {
-	pub(crate) fn new<E, F, W, P>(
-		wrapper: DisruptorWrapper<E, P>,
-		processor_thread_name: &'static str,
-		mut processor: F,
-		processor_affinity: Option<CoreId>,
-		wait_strategy: W
-	) -> Consumer
-	where
-		F: 'static + Send + FnMut(&E, Sequence, bool),
-		E: 'static,
-		W: 'static + WaitStrategy,
-		P: 'static + ProducerBarrier
-	{
-		// Channel is used for communicating the result of setting the thread affinity.
-		let (sender, receiver)          = channel();
-		let thread_name                 = processor_thread_name.to_owned();
-		let thread_builder              = thread::Builder::new().name(thread_name);
-
-		let join_handle: JoinHandle<()> = thread_builder.spawn(move || {
-			let result = set_affinity_if_defined(processor_affinity, processor_thread_name);
-			// Transmit result to calling thread to enable that thread to panic on errors setting
-			// the thread affinity.
-			sender.send(result).expect("Should be able to send.");
-			drop(sender);
-
-			let disruptor              = wrapper.unwrap();
-			let mut sequence: Sequence = 0;
-			loop {
-				let mut available = disruptor.get_highest_published_relaxed(sequence);
-
-				while available < sequence {
-					if disruptor.is_shutting_down() {
-						// Recheck that no new published events are present.
-						if disruptor.get_highest_published_relaxed(sequence) < sequence { return }
-					}
-					wait_strategy.wait_for(sequence);
-					available = disruptor.get_highest_published_relaxed(sequence);
-				}
-				fence(Ordering::Acquire);
-
-				while available >= sequence {
-					let end_of_batch = available == sequence;
-					// SAFETY: Now, we have exclusive access to the element at `sequence`.
-					let mut_element  = disruptor.get(sequence);
-					unsafe {
-						let element: &E = &*mut_element;
-						processor(element, sequence, end_of_batch);
-					}
-					// Signal to producers that we're done processing `sequence`.
-					sequence += 1;
-					disruptor.consumer_barrier.store(sequence, Ordering::Release);
-				}
-			}
-		}).expect("Should spawn thread.");
-
-		let set_affinity_result = receiver.recv().expect("Should receive affinity result");
-		if let Err(affinity_error) = set_affinity_result {
-			eprintln!("Thread affinity error: {}", affinity_error.0);
+	pub(crate) fn new(join_handle: JoinHandle<()>) -> Self {
+		Self {
+			join_handle: Some(join_handle),
 		}
-
-		Consumer { join_handle: Some(join_handle) }
 	}
 
 	pub(crate) fn join(&mut self) {

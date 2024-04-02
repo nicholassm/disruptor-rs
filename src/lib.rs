@@ -15,11 +15,9 @@
 //!
 //! # Examples
 //! ```
-//! use disruptor::builder::build_single_producer;
-//! use disruptor::producer::Producer;
 //! use disruptor::BusySpin;
 //! use disruptor::Sequence;
-//! use disruptor::producer::RingBufferFull;
+//! use disruptor::Producer;
 //!
 //! // The data entity on the ring buffer.
 //! struct Event {
@@ -37,7 +35,7 @@
 //!     // `end_of_batch` being true.
 //! };
 //! // Create a Disruptor with a ring buffer of size 8 and use the `BusySpin` wait strategy.
-//! let mut builder = build_single_producer(8, factory, BusySpin);
+//! let mut builder = disruptor::build_single_producer(8, factory, BusySpin);
 //! let mut producer = builder.handle_events_with(processor).build();
 //! // Publish into the Disruptor.
 //! for i in 0..10 {
@@ -56,6 +54,9 @@ pub type Sequence = i64;
 
 pub use wait_strategies::BusySpin;
 pub use wait_strategies::BusySpinWithSpinLoopHint;
+pub use builder::build_single_producer;
+pub use builder::build_multi_producer;
+pub use producer::Producer;
 
 mod affinity;
 mod barrier;
@@ -71,9 +72,8 @@ pub mod builder;
 
 #[cfg(test)]
 mod tests {
-	use crate::builder::{build_multi_producer, build_single_producer};
-	use crate::wait_strategies::BusySpin;
-	use crate::producer::Producer;
+	use super::*;
+	use std::collections::HashSet;
 	use std::sync::mpsc;
 	use std::thread;
 
@@ -175,8 +175,42 @@ mod tests {
 
 		let mut result: Vec<_> = r.iter().collect();
 		result.sort();
+
 		let expected: Vec<i64> = (0..num_items).collect();
 		assert_eq!(result, expected);
+	}
+
+	#[test]
+	fn spmc_with_concurrent_consumers() {
+		let (s, r) = mpsc::channel();
+
+		let processor1 = {
+			let s = s.clone();
+			move |e: &Event, _, _| { s.send(e.num + 1).unwrap(); }
+		};
+		let processor2 = {
+			let s = s.clone();
+			move |e: &Event, _, _| { s.send(e.num + 2).unwrap(); }
+		};
+		let processor3 = {
+			move |e: &Event, _, _| { s.send(e.num + 3).unwrap(); }
+		};
+
+		let factory      = || { Event { num: -1 }};
+		let builder      = build_single_producer(8, factory, BusySpin);
+		let mut producer = builder
+			.handle_events_with(processor1)
+			.handle_events_with(processor2)
+			.handle_events_with(processor3)
+			.build();
+
+		producer.publish(|e| { e.num = 0; });
+
+		drop(producer);
+
+		let result: HashSet<i64> = r.iter().collect();
+		let expected = HashSet::from([1, 2, 3]);
+		assert_eq!(expected, result);
 	}
 
 	#[test]
@@ -209,8 +243,7 @@ mod tests {
 
 		drop(producer);
 
-		let mut result: Vec<i64> = r.iter().collect();
-		result.sort();
+		let result: Vec<i64> = r.iter().collect();
 		assert_eq!(vec![1, 2, 3], result);
 	}
 }

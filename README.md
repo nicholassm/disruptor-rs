@@ -20,8 +20,9 @@ To read details of how to use the library, check out the documentation on [docs.
 Here's a minimal example:
 
 ```rust
-use disruptor::Builder;
+use disruptor::Sequence
 use disruptor::BusySpin;
+use disruptor::Producer
 
 // The event on the ring buffer.
 struct Event {
@@ -29,17 +30,20 @@ struct Event {
 }
 
 fn main() {
-    // Factory closure for initializing events.
+    // Factory closure for initializing events in the Ring Buffer.
     let factory = || { Event { price: 0.0 }};
 
     // Closure for processing events.
-    let processor = |e: &Event, sequence: i64, end_of_batch: bool| {
+    let processor = |e: &Event, sequence: Sequence, end_of_batch: bool| {
         // Your processing logic here.
     };
 
     let size = 64;
-    let mut producer = Builder::new(size, factory, processor, BusySpin)
-        .create_with_single_producer();
+    let mut producer =
+        disruptor::build_single_producer(size, factory, BusySpin)
+        .handle_events_with(processor)
+        .build();
+
     // Publish into the Disruptor.
     for i in 0..10 {
         producer.publish(|e| {
@@ -51,10 +55,73 @@ fn main() {
  // as well.
 ```
 
+A more advanced usage with multiple producers and multiple interdependent consumers could look like this:
+
+```rust
+use disruptor::Sequence
+use disruptor::BusySpin;
+use disruptor::Producer
+
+// The event on the ring buffer.
+struct Event {
+    price: f64
+}
+
+fn main() {
+    // Factory closure for initializing events in the Ring Buffer.
+    let factory = || { Event { price: 0.0 }};
+
+    // Closure for processing events.
+    let p1 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+        // Processing logic here.
+    };
+    let p2 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+        // Some processing logic here.
+    };
+    let p3 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+        // More processing logic here.
+    };
+
+    let mut producer1 =
+        disruptor::build_multi_producer(64, factory, BusySpin)
+        // `p2` handles events concurrently with `p1`.
+        .handle_events_with(p1)
+        .handle_events_with(p2)
+            .and_then()
+            // `p3` handles events after the `p1` and `p2`.
+            .handle_events_with(p3)
+        .build();
+
+    // Create another producer.
+    let mut producer2 = producer1.clone();
+
+    // Publish into the Disruptor.
+    thread::scope(|s| {
+        s.spawn(move || {
+            for i in 0..10 {
+                producer1.publish(|e| {
+                    e.price = i as f64;
+                });
+            }
+        };
+        s.spawn(move || {
+            for i in 10..20 {
+                producer2.publish(|e| {
+                    e.price = i as f64;
+                });
+            }
+        };
+    });
+}// At this point, the Producers instances go out of scope and when the
+ // processors are done handling all events then the Disruptor is dropped
+ // as well.
+```
+
 # Features
 
-- [x] Single Producer Single Consumer (SPSC). See roadmap for MPMC.
+- [x] Single Producer Single Consumer (SPSC).
 - [x] Multi Producer Single Consumer (MPSC).
+- [x] Multi Producer Multi Consumer (MPMC) with consumer interdependencies.
 - [x] Low-latency.
 - [x] Busy-spin wait strategies.
 - [x] Batch consumption of events.
@@ -65,9 +132,11 @@ fn main() {
 Everything in the library is about low-latency and this heavily influences all choices made in this library.
 As an example, you cannot allocate an event and *move* that into the ringbuffer. Instead, events
 are allocated on startup to ensure they are co-located in memory to increase cache coherency.
-(However, you can still allocate a struct on the heap and move ownership to a field in the event on the Ringbuffer.
+However, you can still allocate a struct on the heap and move ownership to a field in the event on the Ringbuffer.
 As long as you realize that this can add latency, because the struct is allocated by one thread and dropped by another.
-Hence, there's synchronization happening in the allocator.)
+Hence, there's synchronization happening in the allocator.
+
+There's also no use of dynamic dispatch - everything is monomorphed.
 
 # Performance
 
@@ -171,7 +240,7 @@ that neither of the above libraries support (at the time of writing).
 
 # Roadmap
 
-1. Support for multiple consumers/event processor threads including interdependencies.
-2. Verify correctness with Miri.
-3. Add a Sleeping Wait Strategy.
-4. Support for batch publication.
+1. Verify correctness with Miri.
+2. Add a Sleeping Wait Strategy.
+3. Support for batch publication.
+4. Add specialization of the `ConsumerBarrier` when there's only a single consumer.

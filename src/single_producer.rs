@@ -7,7 +7,7 @@ use crate::{barrier::{Barrier, NONE}, consumer::{Consumer, ConsumerBarrier}, cur
 
 /// Producer for publishing to the Disruptor from a single thread.
 ///
-/// See also [`MultiProducer`] for multi-threaded publication.
+/// See also [`crate::multi_producer::MultiProducer`] for multi-threaded publication.
 pub struct SingleProducer<E, P> {
 	shutdown_at_sequence:        Arc<CachePadded<AtomicI64>>,
 	ring_buffer:                 *mut RingBuffer<E>,

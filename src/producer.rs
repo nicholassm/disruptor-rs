@@ -27,7 +27,7 @@ pub trait ProducerBarrier : Barrier {
 	fn next(&self) -> Sequence;
 
 	/// Publishes the sequence number that is now available for being read by consumers.
-	/// (The sequence number is stored with [`Ordering::Release`] semantics.)
+	/// (The sequence number is stored with [`std::sync::atomic::Ordering::Release`] semantics.)
 	fn publish(&self, sequence: Sequence);
 }
 

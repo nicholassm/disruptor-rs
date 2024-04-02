@@ -86,7 +86,7 @@ struct SharedProducer {
 	counter:   AtomicI64,
 }
 
-/// See also [`SingleProducer`] for single-threaded publication.
+/// See also [`crate::single_producer::SingleProducer`] for single-threaded publication.
 pub struct MultiProducer<E, P: ProducerBarrier + Barrier> {
 	shutdown_at_sequence:        Arc<CachePadded<AtomicI64>>,
 	ring_buffer:                 *mut RingBuffer<E>,

@@ -20,9 +20,9 @@ To read details of how to use the library, check out the documentation on [docs.
 Here's a minimal example:
 
 ```rust
-use disruptor::Sequence
+use disruptor::Sequence;
 use disruptor::BusySpin;
-use disruptor::Producer
+use disruptor::Producer;
 
 // The event on the ring buffer.
 struct Event {
@@ -58,9 +58,9 @@ fn main() {
 A more advanced usage with multiple producers and multiple interdependent consumers could look like this:
 
 ```rust
-use disruptor::Sequence
+use disruptor::Sequence;
 use disruptor::BusySpin;
-use disruptor::Producer
+use disruptor::Producer;
 
 // The event on the ring buffer.
 struct Event {

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput, BenchmarkGroup};
 use criterion::measurement::WallTime;
 use crossbeam::channel::bounded;
-use disruptor::{Builder, BusySpin};
+use disruptor::{BusySpin, Producer};
 
 const DATA_STRUCTURE_SIZE: usize = 64;
 const BURST_SIZES: [u64; 5]      = [1, 5, 10, 50, 100];
@@ -101,8 +101,9 @@ fn disruptor(group: &mut BenchmarkGroup<WallTime>, inputs: (u64, u64), param: &s
 			sink.store(event.data, Ordering::Relaxed);
 		}
 	};
-	let mut producer = Builder::new(DATA_STRUCTURE_SIZE, factory, processor, BusySpin)
-		.create_with_single_producer();
+	let mut producer = disruptor::build_single_producer(DATA_STRUCTURE_SIZE, factory, BusySpin)
+		.handle_events_with(processor)
+		.build();
 	let mut data     = black_box(0);
 	let benchmark_id = BenchmarkId::new("disruptor", &param);
 	group.bench_with_input(benchmark_id, &inputs, move |b, (size, pause_ms) | b.iter_custom(|iters| {

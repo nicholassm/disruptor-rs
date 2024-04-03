@@ -12,7 +12,7 @@ use crate::ringbuffer::RingBuffer;
 use crate::single_producer::SingleProducerBarrier;
 use crate::wait_strategies::WaitStrategy;
 
-/// Create builder for a `[SingleProducer]`.
+/// Create builder for a [`SingleProducer`].
 pub fn build_single_producer<E, W, F>(size: usize, event_factory: F, wait_strategy: W)
 -> Builder<E, W, SingleProducerBarrier, SingleProducer<E, SingleProducerBarrier>>
 where
@@ -23,7 +23,7 @@ where
 	Builder::new(size, event_factory, wait_strategy)
 }
 
-/// Create builder for a `[MultiProducer]`.
+/// Create builder for a [`MultiProducer`].
 pub fn build_multi_producer<E, W, F>(size: usize, event_factory: F, wait_strategy: W)
 -> Builder<E, W, MultiProducerBarrier, MultiProducer<E, MultiProducerBarrier>>
 where
@@ -44,7 +44,7 @@ where
 	consumer_barrier:  Option<ConsumerBarrier>,
 }
 
-/// DSL used for configuring and constructing a Disruptor.
+/// Builder used for configuring and constructing a Disruptor.
 pub struct Builder<E, W, P, PR>
 where
 	PR: Producer<E, P>

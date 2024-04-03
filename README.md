@@ -44,7 +44,7 @@ fn main() {
         .handle_events_with(processor)
         .build();
 
-    // Publish into the Disruptor.
+    // Publish into the Disruptor via the `Producer` handle.
     for i in 0..10 {
         producer.publish(|e| {
             e.price = i as f64;
@@ -72,24 +72,24 @@ fn main() {
     let factory = || { Event { price: 0.0 }};
 
     // Closure for processing events.
-    let p1 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+    let h1 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
         // Processing logic here.
     };
-    let p2 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+    let h2 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
         // Some processing logic here.
     };
-    let p3 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+    let h3 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
         // More processing logic here.
     };
 
     let mut producer1 =
         disruptor::build_multi_producer(64, factory, BusySpin)
-        // `p2` handles events concurrently with `p1`.
-        .handle_events_with(p1)
-        .handle_events_with(p2)
+        // `h2` handles events concurrently with `h1`.
+        .handle_events_with(h1)
+        .handle_events_with(h2)
             .and_then()
-            // `p3` handles events after the `p1` and `p2`.
-            .handle_events_with(p3)
+            // `h3` handles events after `h1` and `h2`.
+            .handle_events_with(h3)
         .build();
 
     // Create another producer.
@@ -240,7 +240,7 @@ that neither of the above libraries support (at the time of writing).
 
 # Roadmap
 
-1. Verify correctness with Miri.
-2. Add a Sleeping Wait Strategy.
-3. Support for batch publication.
-4. Add specialization of the `ConsumerBarrier` when there's only a single consumer.
+1. Add specialization of the `ConsumerBarrier` when there's only a single consumer.
+2. Verify correctness with Miri.
+3. Add a Sleeping Wait Strategy.
+4. Support for batch publication.

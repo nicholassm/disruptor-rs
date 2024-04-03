@@ -57,6 +57,7 @@ pub use wait_strategies::BusySpinWithSpinLoopHint;
 pub use builder::build_single_producer;
 pub use builder::build_multi_producer;
 pub use producer::Producer;
+pub use producer::RingBufferFull;
 
 mod affinity;
 mod barrier;

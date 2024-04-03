@@ -64,10 +64,10 @@ pub trait Producer<E, P> : ProducerImpl<E, P> {
 	/// # Examples
 	///
 	/// ```
-	///# use disruptor::builder::build_single_producer;
-	///# use disruptor::producer::Producer;
+	///# use disruptor::build_single_producer;
+	///# use disruptor::Producer;
 	///# use disruptor::BusySpin;
-	///# use disruptor::producer::RingBufferFull;
+	///# use disruptor::RingBufferFull;
 	///#
 	/// // The example data entity on the ring buffer.
 	/// struct Event {
@@ -100,10 +100,10 @@ pub trait Producer<E, P> : ProducerImpl<E, P> {
 	/// # Examples
 	///
 	/// ```
-	///# use disruptor::builder::build_single_producer;
-	///# use disruptor::producer::Producer;
+	///# use disruptor::build_single_producer;
+	///# use disruptor::Producer;
 	///# use disruptor::BusySpin;
-	///# use disruptor::producer::RingBufferFull;
+	///# use disruptor::RingBufferFull;
 	///#
 	/// // The example data entity on the ring buffer.
 	/// struct Event {

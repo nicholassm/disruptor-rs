@@ -55,7 +55,8 @@ fn main() {
  // as well.
 ```
 
-A more advanced usage with multiple producers and multiple interdependent consumers could look like this:
+The library also supports pinning threads on cores to avoid latency induced by context switching.
+A more advanced usage demonstrating this and with multiple producers and multiple interdependent consumers could look like this:
 
 ```rust
 use disruptor::Sequence;
@@ -85,11 +86,11 @@ fn main() {
     let mut producer1 =
         disruptor::build_multi_producer(64, factory, BusySpin)
         // `h2` handles events concurrently with `h1`.
-        .handle_events_with(h1)
-        .handle_events_with(h2)
+        .pin_at_core(1).handle_events_with(h1)
+        .pin_at_core(2).handle_events_with(h2)
             .and_then()
             // `h3` handles events after `h1` and `h2`.
-            .handle_events_with(h3)
+            .pin_at_core(3).handle_events_with(h3)
         .build();
 
     // Create another producer.
@@ -122,10 +123,10 @@ fn main() {
 - [x] Single Producer Single Consumer (SPSC).
 - [x] Multi Producer Single Consumer (MPSC).
 - [x] Multi Producer Multi Consumer (MPMC) with consumer interdependencies.
-- [x] Low-latency.
 - [x] Busy-spin wait strategies.
 - [x] Batch consumption of events.
-- [x] Thread affinity can be set for the event processor thread.
+- [x] Thread affinity can be set for the event processor thread(s).
+- [x] Set thread name of each event processor thread.
 
 # Design Choices
 

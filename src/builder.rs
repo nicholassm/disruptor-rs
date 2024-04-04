@@ -1,19 +1,42 @@
 //! Module for building the Disruptor and adding event handlers.
+//!
+//! # Examples
+//!
+//! ```
+//!# use disruptor::build_single_producer;
+//!# use disruptor::Producer;
+//!# use disruptor::BusySpin;
+//!# use disruptor::RingBufferFull;
+//!#
+//! // The example data entity on the ring buffer.
+//! struct Event {
+//!     price: f64
+//! }
+//! let factory = || { Event { price: 0.0 }};
+//!# let processor1 = |e: &Event, _, _| {};
+//!# let processor2 = |e: &Event, _, _| {};
+//!# let processor3 = |e: &Event, _, _| {};
+//! let mut producer = disruptor::build_single_producer(8, factory, BusySpin)
+//!    .pined_at_core(1).thread_named("my_processor").handle_events_with(processor1)
+//!    .handle_events_with(processor2) // Not pinned and getting a generic name.
+//!    .and_then()
+//!        .pined_at_core(2).handle_events_with(processor3) // Pined but with a generic name.
+//!    .build();
+//! ```
 
 use std::{marker::PhantomData, sync::{atomic::{fence, AtomicI64, Ordering}, Arc}, thread};
 use core_affinity::CoreId;
 use crossbeam_utils::CachePadded;
-use crate::{affinity::{cpu_has_core_else_panic, set_affinity_if_defined}, barrier::{Barrier, NONE}, multi_producer::MultiProducer, single_producer::SingleProducer, Sequence};
+use crate::{affinity::{cpu_has_core_else_panic, set_affinity_if_defined}, barrier::{Barrier, NONE}, Sequence};
 use crate::consumer::{Consumer, ConsumerBarrier};
 use crate::cursor::Cursor;
-use crate::multi_producer::MultiProducerBarrier;
-use crate::producer::{Producer, ProducerBarrier};
+use crate::producer::{Producer, single::{SingleProducer, SingleProducerBarrier}, multi::{MultiProducer, MultiProducerBarrier}, ProducerBarrier};
 use crate::ringbuffer::RingBuffer;
-use crate::single_producer::SingleProducerBarrier;
 use crate::wait_strategies::WaitStrategy;
 
-/// Create builder for a [`SingleProducer`]. Use this if you only need to publish
-/// events from one thread.
+/// Build a single producer Disruptor. Use this if you only need to publish events from one thread.
+///
+/// For using a producer see [`Producer`].
 pub fn build_single_producer<E, W, F>(size: usize, event_factory: F, wait_strategy: W)
 -> Builder<E, W, SingleProducerBarrier, SingleProducer<E, SingleProducerBarrier>>
 where
@@ -21,11 +44,13 @@ where
 	E: 'static,
 	W: 'static + WaitStrategy,
 {
-	Builder::new(size, event_factory, wait_strategy)
+	let producer_barrier = SingleProducerBarrier::new();
+	Builder::new(size, event_factory, wait_strategy, producer_barrier)
 }
 
-/// Create builder for a [`MultiProducer`]. Use this if you need to publish events
-/// from many threads.
+/// Build a multi producer Disruptor. Use this if you need to publish events from many threads.
+///
+/// For using a producer see [`Producer`].
 pub fn build_multi_producer<E, W, F>(size: usize, event_factory: F, wait_strategy: W)
 -> Builder<E, W, MultiProducerBarrier, MultiProducer<E, MultiProducerBarrier>>
 where
@@ -33,10 +58,13 @@ where
 	E: 'static,
 	W: 'static + WaitStrategy,
 {
-	Builder::new(size, event_factory, wait_strategy)
+	let producer_barrier = MultiProducerBarrier::new(size);
+	Builder::new(size, event_factory, wait_strategy, producer_barrier)
 }
 
 /// Adds a dependency on all previously added event handlers.
+///
+/// See [`Builder`] for examples of usage (they have the same methods).
 pub struct DependencyChain<E, W, P, PR>
 where
 	PR: Producer<E, P>
@@ -47,6 +75,30 @@ where
 }
 
 /// Builder used for configuring and constructing a Disruptor.
+///
+/// # Examples
+///
+/// ```
+///# use disruptor::build_single_producer;
+///# use disruptor::Producer;
+///# use disruptor::BusySpin;
+///# use disruptor::RingBufferFull;
+///#
+/// // The example data entity on the ring buffer.
+/// struct Event {
+///     price: f64
+/// }
+/// let factory = || { Event { price: 0.0 }};
+///# let processor1 = |e: &Event, _, _| {};
+///# let processor2 = |e: &Event, _, _| {};
+///# let processor3 = |e: &Event, _, _| {};
+/// let mut producer = disruptor::build_single_producer(8, factory, BusySpin)
+///    .pined_at_core(1).thread_named("my_processor").handle_events_with(processor1)
+///    .handle_events_with(processor2) // Not pinned and getting a generic name.
+///    .and_then()
+///        .pined_at_core(2).handle_events_with(processor3) // Pined but with a generic name.
+///    .build();
+/// ```
 pub struct Builder<E, W, P, PR>
 where
 	PR: Producer<E, P>
@@ -97,14 +149,14 @@ where
 	W:  'static + WaitStrategy,
 	PR: Producer<E, P>,
 {
-	fn new<F>(size: usize, event_factory: F, wait_strategy: W) -> Self
+	fn new<F>(size: usize, event_factory: F, wait_strategy: W, producer_barrier: P) -> Self
 	where
 		F: FnMut() -> E
 	{
 		let ring_buffer          = Box::into_raw(Box::new(RingBuffer::new(size, event_factory)));
-		let producer_barrier     = Arc::new(P::new(size));
+		let producer_barrier     = Arc::new(producer_barrier);
 		let shutdown_at_sequence = Arc::new(CachePadded::new(AtomicI64::new(NONE)));
-		let consumer_barrier     = Some(ConsumerBarrier::new(0));
+		let consumer_barrier     = Some(ConsumerBarrier::new());
 
 		Builder {
 			ring_buffer,
@@ -148,7 +200,7 @@ where
 	/// events after all previous consumers have read them.
 	pub fn and_then(mut self) -> DependencyChain<E, W, P, PR> {
 		let dependent_barrier = Arc::new(self.consumer_barrier.take().unwrap());
-		let consumer_barrier  = Some(ConsumerBarrier::new(0));
+		let consumer_barrier  = Some(ConsumerBarrier::new());
 		DependencyChain {
 			builder: self,
 			dependent_barrier,
@@ -204,7 +256,7 @@ where
 	/// events after all previous consumers have read them.
 	pub fn and_then(mut self) -> DependencyChain<E, W, P, PR> {
 		let dependent_barrier = Arc::new(self.consumer_barrier.take().unwrap());
-		let consumer_barrier  = Some(ConsumerBarrier::new(0));
+		let consumer_barrier  = Some(ConsumerBarrier::new());
 		DependencyChain {
 			builder: self.builder,
 			dependent_barrier,
@@ -249,14 +301,14 @@ where
 			let ring_buffer  = wrapper.unwrap();
 			let mut sequence = 0;
 			loop {
-				let mut available = barrier.get_relaxed(sequence);
+				let mut available = barrier.get_after(sequence);
 				while available < sequence {
 					// If publisher(s) are done publishing events we're done.
 					if shutdown_at_sequence.load(Ordering::Relaxed) == sequence {
 						return;
 					}
 					wait_strategy.wait_for(sequence);
-					available = barrier.get_relaxed(sequence);
+					available = barrier.get_after(sequence);
 				}
 				fence(Ordering::Acquire);
 

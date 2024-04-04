@@ -2,7 +2,8 @@ use std::cell::UnsafeCell;
 
 use crate::Sequence;
 
-pub(crate) struct RingBuffer<E> {
+#[doc(hidden)]
+pub struct RingBuffer<E> {
 	buffer:     Box<[UnsafeCell<E>]>,
 	index_mask: i64,
 }

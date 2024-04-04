@@ -9,7 +9,7 @@
 //! It also owns and manages the processing thread(s) for the convenience of the library users.
 //!
 //! When the Disruptor is created, you choose whether publication to the Disruptor will happen from
-//! one or multiple threads via **Producer** handles.
+//! one or multiple threads via [`Producer`] handles.
 //! In any case, when the last Producer goes out of scope, all events published are processed and
 //! then the processing thread(s) will be stopped and the entire Disruptor will be dropped.
 //!
@@ -52,24 +52,21 @@
 /// The type of Sequence numbers in the Ring Buffer.
 pub type Sequence = i64;
 
-pub use wait_strategies::BusySpin;
-pub use wait_strategies::BusySpinWithSpinLoopHint;
 pub use builder::build_single_producer;
 pub use builder::build_multi_producer;
 pub use producer::Producer;
 pub use producer::RingBufferFull;
+pub use wait_strategies::BusySpin;
+pub use wait_strategies::BusySpinWithSpinLoopHint;
 
 mod affinity;
 mod barrier;
 mod consumer;
 mod cursor;
 mod ringbuffer;
-
-pub mod producer;
-pub mod single_producer;
-pub mod multi_producer;
-pub mod wait_strategies;
-pub mod builder;
+mod producer;
+mod builder;
+mod wait_strategies;
 
 #[cfg(test)]
 mod tests {

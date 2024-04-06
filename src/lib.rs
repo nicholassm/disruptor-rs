@@ -5,19 +5,44 @@
 //!
 //! # General Usage
 //!
+//! The usage can be divided into three stages:
+//! 1. **Setup:** Build the Disruptor and setup consumers including any interdependencies.
+//! 2. **Publish:** Publish into the Disruptor.
+//! 3. **Shutdown:** Stop all consumer threads and drop the Disruptor and the consumer(s).
+//!
 //! The Disruptor in this library can only be used once. I.e. it cannot be rewound and restarted.
+//!
 //! It also owns and manages the processing thread(s) for the convenience of the library users.
 //!
+//! ## Setup
+//!
 //! When the Disruptor is created, you choose whether publication to the Disruptor will happen from
-//! one or multiple threads via [`Producer`] handles.
-//! In any case, when the last Producer goes out of scope, all events published are processed and
-//! then the processing thread(s) will be stopped and the entire Disruptor will be dropped.
+//! one or multiple threads via [`Producer`] handles. The size of the RingBuffer is also specified
+//! and you have to provide a "factory" closure for initializing the events inside the RingBufffer.
+//! Then all consumers are added.
+//!
+//! Use either [builder_single_producer](crate::builder::build_single_producer) or
+//! [builder_multi_producer](crate::builder::build_multi_producer) to get started.
+//!
+//! ## Publish
+//!
+//! Once the Disruptor is built, you have a [`Producer`] "handle" which can be used to publish into the
+//! Disruptor. In case of a multi producer Disruptor, the [`Producer`] can be cloned so that each
+//! publishing thread has its own handle.
+//!
+//! ## Shutdown
+//!
+//! Finally, when there's no more events to publish and the last Producer goes out of scope, all events
+//! published are processed and then the processing thread(s) will be stopped and the entire Disruptor
+//! will be dropped including consumers.
 //!
 //! # Examples
 //! ```
 //! use disruptor::BusySpin;
 //! use disruptor::Sequence;
 //! use disruptor::Producer;
+//!
+//! // *** Phase SETUP ***
 //!
 //! // The data entity on the ring buffer.
 //! struct Event {
@@ -34,31 +59,32 @@
 //!     // If `end_of_batch` is false, you can batch up events until it's invoked with
 //!     // `end_of_batch` being true.
 //! };
+//!
 //! // Create a Disruptor with a ring buffer of size 8 and use the `BusySpin` wait strategy.
 //! let mut builder = disruptor::build_single_producer(8, factory, BusySpin);
 //! let mut producer = builder.handle_events_with(processor).build();
+//!
+//! // *** Phase PUBLISH ***
+//!
 //! // Publish into the Disruptor.
 //! for i in 0..10 {
 //!     producer.publish(|e| {
 //!         e.price = i as f64;
 //!     });
 //! }
-//! // the Producer instance goes out of scope and the Disruptor (and the Producer) are dropped.
+//! // *** Phase SHUTDOWN ***
+//!
+//! // The Producer instance goes out of scope and the Disruptor, the processor (consumer) and
+//! // the Producer are dropped.
 //! ```
 
 #![deny(rustdoc::broken_intra_doc_links)]
 #![warn(missing_docs)]
 
-/// The type of Sequence numbers in the Ring Buffer.
+/// The type for Sequence numbers in the Ring Buffer ([`i64`]).
 pub type Sequence = i64;
 
-pub use builder::build_single_producer;
-pub use builder::build_multi_producer;
-pub use producer::Producer;
-pub use producer::RingBufferFull;
-pub use wait_strategies::BusySpin;
-pub use wait_strategies::BusySpinWithSpinLoopHint;
-
+pub mod wait_strategies;
 mod affinity;
 mod barrier;
 mod consumer;
@@ -66,7 +92,10 @@ mod cursor;
 mod ringbuffer;
 mod producer;
 mod builder;
-mod wait_strategies;
+
+pub use builder::{build_single_producer, build_multi_producer, Builder, DependencyChain};
+pub use producer::{Producer, RingBufferFull};
+pub use wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
 
 #[cfg(test)]
 mod tests {

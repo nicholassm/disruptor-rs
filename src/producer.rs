@@ -1,6 +1,4 @@
 //! Module with different producer handles for publishing into the Disruptor.
-//!
-//! Both publishing from a single thread (fastest) and from multiple threads is supported.
 
 pub mod single;
 pub mod multi;

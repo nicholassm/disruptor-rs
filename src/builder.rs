@@ -1,28 +1,4 @@
 //! Module for building the Disruptor and adding event handlers.
-//!
-//! # Examples
-//!
-//! ```
-//!# use disruptor::build_single_producer;
-//!# use disruptor::Producer;
-//!# use disruptor::BusySpin;
-//!# use disruptor::RingBufferFull;
-//!#
-//! // The example data entity on the ring buffer.
-//! struct Event {
-//!     price: f64
-//! }
-//! let factory = || { Event { price: 0.0 }};
-//!# let processor1 = |e: &Event, _, _| {};
-//!# let processor2 = |e: &Event, _, _| {};
-//!# let processor3 = |e: &Event, _, _| {};
-//! let mut producer = disruptor::build_single_producer(8, factory, BusySpin)
-//!    .pined_at_core(1).thread_named("my_processor").handle_events_with(processor1)
-//!    .handle_events_with(processor2) // Not pinned and getting a generic name.
-//!    .and_then()
-//!        .pined_at_core(2).handle_events_with(processor3) // Pined but with a generic name.
-//!    .build();
-//! ```
 
 use std::{marker::PhantomData, sync::{atomic::{fence, AtomicI64, Ordering}, Arc}, thread};
 use core_affinity::CoreId;
@@ -62,7 +38,9 @@ where
 	Builder::new(size, event_factory, wait_strategy, producer_barrier)
 }
 
-/// Adds a dependency on all previously added event handlers.
+/// Part of the builder api. Adds a barrier so that further added event handlers
+/// will process the events after all previously added event handlers. As such,
+/// the barriers form a chain of dependencies between event handlers.
 ///
 /// See [`Builder`] for examples of usage (they have the same methods).
 pub struct DependencyChain<E, W, P, PR>
@@ -74,7 +52,8 @@ where
 	consumer_barrier:  Option<ConsumerBarrier>,
 }
 
-/// Builder used for configuring and constructing a Disruptor.
+/// Builder used for configuring and constructing a Disruptor including setting
+/// consumer thread names and affinities.
 ///
 /// # Examples
 ///
@@ -94,8 +73,9 @@ where
 ///# let processor3 = |e: &Event, _, _| {};
 /// let mut producer = disruptor::build_single_producer(8, factory, BusySpin)
 ///    .pined_at_core(1).thread_named("my_processor").handle_events_with(processor1)
-///    .handle_events_with(processor2) // Not pinned and getting a generic name.
+///    .handle_events_with(processor2) // Not pinned and thread getting a generic name.
 ///    .and_then()
+///        // `processor3` only reads events after the other two processors are done reading.
 ///        .pined_at_core(2).handle_events_with(processor3) // Pined but with a generic name.
 ///    .build();
 /// ```
@@ -170,7 +150,7 @@ where
 		}
 	}
 
-	/// Pin processor thread on the core with `id`.
+	/// Pin processor thread on the core with `id` for the next added event handler.
 	/// Outputs an error on stderr if the thread could not be pinned.
 	pub fn pined_at_core(mut self, id: usize) -> Self {
 		cpu_has_core_else_panic(id);
@@ -178,7 +158,7 @@ where
 		self
 	}
 
-	/// Set a name for the processor thread.
+	/// Set a name for the processor thread for the next added event handler.
 	pub fn thread_named(mut self, name: &'static str) -> Self {
 		self.thread_context.name = Some(name.to_owned());
 		self
@@ -239,14 +219,14 @@ where
 		self
 	}
 
-	/// Pin processor thread on the core with `id`.
+	/// Pin processor thread on the core with `id` for the next added event handler.
 	/// Outputs an error on stderr if the thread could not be pinned.
 	pub fn pined_at_core(mut self, id: usize) -> Self {
 		self.builder = self.builder.pined_at_core(id);
 		self
 	}
 
-	/// Set a name for the processor thread.
+	/// Set a name for the processor thread for the next added event handler.
 	pub fn thread_named(mut self, name: &'static str) -> Self {
 		self.builder = self.builder.thread_named(name);
 		self

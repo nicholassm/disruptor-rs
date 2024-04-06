@@ -158,12 +158,14 @@ impl SingleProducerBarrier {
 
 impl Barrier for SingleProducerBarrier {
 	/// Gets the `Sequence` of the last published event.
+	#[inline]
 	fn get_after(&self, _lower_bound: Sequence) -> Sequence {
 		self.cursor.relaxed_value()
 	}
 }
 
 impl ProducerBarrier for SingleProducerBarrier {
+	#[inline]
 	fn next(&self) -> Sequence {
 		self.cursor.next()
 	}

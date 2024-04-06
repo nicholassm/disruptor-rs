@@ -39,6 +39,7 @@ impl ConsumerBarrier {
 	/// Note, to establish proper happens-before relationships (and thus proper synchronization),
 	/// the caller must issue a [`std::sync::atomic::fence`] with
 	/// [`Ordering::Acquire`](std::sync::atomic::Ordering::Acquire).
+	#[inline]
 	pub(crate) fn get(&self) -> Sequence {
 		self.get_after(0)
 	}
@@ -46,6 +47,7 @@ impl ConsumerBarrier {
 
 impl Barrier for ConsumerBarrier {
 	/// Gets the available `Sequence` of the slowest consumer.
+	#[inline]
 	fn get_after(&self, _lower_bound: Sequence) -> Sequence {
 		self.cursors.iter().fold(i64::MAX, |min_sequence, cursor| {
 			let sequence = cursor.relaxed_value();

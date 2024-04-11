@@ -19,33 +19,38 @@ impl Consumer {
 }
 
 #[doc(hidden)]
-pub struct ConsumerBarrier {
+pub struct SingleConsumerBarrier {
+	cursor: Arc<Cursor>
+}
+
+#[doc(hidden)]
+pub struct MultiConsumerBarrier {
 	cursors: Vec<Arc<Cursor>>
 }
 
-impl ConsumerBarrier {
-	pub(crate) fn new() -> Self {
+impl SingleConsumerBarrier {
+	pub(crate) fn new(cursor: Arc<Cursor>) -> Self {
 		Self {
-			cursors: vec![]
+			cursor
 		}
-	}
-
-	pub(crate) fn add(&mut self, cursor: Arc<Cursor>) {
-		self.cursors.push(cursor);
-	}
-
-	/// Gets the available `Sequence` of the slowest consumer.
-	///
-	/// Note, to establish proper happens-before relationships (and thus proper synchronization),
-	/// the caller must issue a [`std::sync::atomic::fence`] with
-	/// [`Ordering::Acquire`](std::sync::atomic::Ordering::Acquire).
-	#[inline]
-	pub(crate) fn get(&self) -> Sequence {
-		self.get_after(0)
 	}
 }
 
-impl Barrier for ConsumerBarrier {
+impl Barrier for SingleConsumerBarrier {
+	fn get_after(&self, _lower_bound: Sequence) -> Sequence {
+		self.cursor.relaxed_value()
+	}
+}
+
+impl MultiConsumerBarrier {
+	pub(crate) fn new(cursors: Vec<Arc<Cursor>>) -> Self {
+		Self {
+			cursors
+		}
+	}
+}
+
+impl Barrier for MultiConsumerBarrier {
 	/// Gets the available `Sequence` of the slowest consumer.
 	#[inline]
 	fn get_after(&self, _lower_bound: Sequence) -> Sequence {

@@ -1,19 +1,19 @@
 use std::sync::atomic::Ordering;
 use crate::{barrier::{Barrier, NONE}, cursor::Cursor, producer::ProducerBarrier};
 use crossbeam_utils::CachePadded;
-use crate::{consumer::{Consumer, ConsumerBarrier}, ringbuffer::RingBuffer, Sequence};
+use crate::{consumer::Consumer, ringbuffer::RingBuffer, Sequence};
 use super::*;
 
 /// Producer for publishing to the Disruptor from a single thread.
 ///
 /// See also [MultiProducer](crate::multi_producer::MultiProducer) for multi-threaded publication and
 /// [`Producer`] for how to use a Producer.
-pub struct SingleProducer<E, P> {
+pub struct SingleProducer<E, C> {
 	shutdown_at_sequence:        Arc<CachePadded<AtomicI64>>,
 	ring_buffer:                 *mut RingBuffer<E>,
-	producer_barrier:            Arc<P>,
+	producer_barrier:            Arc<SingleProducerBarrier>,
 	consumers:                   Vec<Consumer>,
-	consumer_barrier:            ConsumerBarrier,
+	consumer_barrier:            C,
 	/// Next sequence to be published.
 	sequence:                    Sequence,
 	/// Highest sequence available for publication because the Consumers are "enough" behind
@@ -21,9 +21,12 @@ pub struct SingleProducer<E, P> {
 	sequence_clear_of_consumers: Sequence,
 }
 
-unsafe impl<E: Send, P> Send for SingleProducer<E, P> {}
+unsafe impl<E: Send, C> Send for SingleProducer<E, C> {}
 
-impl<E, P> Producer<E, P> for SingleProducer<E, P> where P: ProducerBarrier {
+impl<E, C> Producer<E> for SingleProducer<E, C>
+where
+	C: Barrier
+{
 	#[inline]
 	fn try_publish<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull>
 	where
@@ -41,30 +44,18 @@ impl<E, P> Producer<E, P> for SingleProducer<E, P> where P: ProducerBarrier {
 		while let Err(RingBufferFull) = self.next_sequence() { /* Empty. */ }
 		self.apply_update(update).expect("Ringbuffer should not be full.");
 	}
-
-	fn new(
-		shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
-		ring_buffer:          *mut RingBuffer<E>,
-		producer_barrier:     Arc<P>,
-		consumers:            Vec<Consumer>,
-		consumer_barrier:     ConsumerBarrier,
-	) -> Self {
-		SingleProducer::new(
-			shutdown_at_sequence,
-			ring_buffer,
-			producer_barrier,
-			consumers,
-			consumer_barrier)
-	}
 }
 
-impl<E, P> SingleProducer<E, P> where P: ProducerBarrier {
-	fn new(
+impl<E, C> SingleProducer<E, C>
+where
+	C: Barrier
+{
+	pub(crate) fn new(
 		shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
 		ring_buffer:          *mut RingBuffer<E>,
-		producer_barrier:     Arc<P>,
+		producer_barrier:     Arc<SingleProducerBarrier>,
 		consumers:            Vec<Consumer>,
-		consumer_barrier:     ConsumerBarrier,
+		consumer_barrier:     C,
 	) -> Self
 	{
 		let sequence_clear_of_consumers = unsafe { (*ring_buffer).size() - 1};
@@ -89,7 +80,7 @@ impl<E, P> SingleProducer<E, P> where P: ProducerBarrier {
 			// (The slowest consumer is an entire ring buffer behind the producer).
 			let ring_buffer                = self.ring_buffer();
 			let wrap_point                 = ring_buffer.wrap_point(sequence);
-			let lowest_sequence_being_read = self.consumer_barrier.get() + 1;
+			let lowest_sequence_being_read = self.consumer_barrier.get_after(sequence) + 1;
 			if lowest_sequence_being_read == wrap_point {
 				return Err(RingBufferFull);
 			}
@@ -130,7 +121,7 @@ impl<E, P> SingleProducer<E, P> where P: ProducerBarrier {
 }
 
 /// Stops the processor thread and drops the Disruptor, the processor thread and the [Producer].
-impl<E, P> Drop for SingleProducer<E, P> {
+impl<E, C> Drop for SingleProducer<E, C> {
 	fn drop(&mut self) {
 		self.shutdown_at_sequence.store(self.sequence, Ordering::Relaxed);
 		self.consumers.iter_mut().for_each(|c| { c.join(); });

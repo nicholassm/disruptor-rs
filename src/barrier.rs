@@ -4,7 +4,7 @@ use crate::Sequence;
 pub const NONE: Sequence = -1;
 
 #[doc(hidden)]
-pub trait Barrier {
+pub trait Barrier: Send + Sync {
 	/// Gets the sequence number of the barrier with relaxed memory ordering.
 	///
 	/// Note, to establish proper happens-before relationships (and thus proper synchronization),

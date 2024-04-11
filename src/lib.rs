@@ -17,18 +17,17 @@
 //! ## Setup
 //!
 //! When the Disruptor is created, you choose whether publication to the Disruptor will happen from
-//! one or multiple threads via [`Producer`] handles. The size of the RingBuffer is also specified
-//! and you have to provide a "factory" closure for initializing the events inside the RingBufffer.
-//! Then all consumers are added.
+//! one or multiple threads via [`Producer`] handles. The size of the
+//! RingBuffer is also specified and you have to provide a "factory" closure for initializing the
+//! events inside the RingBufffer. Then all consumers are added.
 //!
-//! Use either [builder_single_producer](crate::builder::build_single_producer) or
-//! [builder_multi_producer](crate::builder::build_multi_producer) to get started.
+//! Use either [`build_single_producer`] or [`build_multi_producer`] to get started.
 //!
 //! ## Publish
 //!
-//! Once the Disruptor is built, you have a [`Producer`] "handle" which can be used to publish into the
-//! Disruptor. In case of a multi producer Disruptor, the [`Producer`] can be cloned so that each
-//! publishing thread has its own handle.
+//! Once the Disruptor is built, you have a [`Producer`] "handle" which can be used to publish into
+//! the Disruptor. In case of a multi producer Disruptor, the [`Producer`] can be cloned so that
+//! each publishing thread has its own handle.
 //!
 //! ## Shutdown
 //!
@@ -38,9 +37,7 @@
 //!
 //! # Examples
 //! ```
-//! use disruptor::BusySpin;
-//! use disruptor::Sequence;
-//! use disruptor::Producer;
+//! use disruptor::*;
 //!
 //! // *** Phase SETUP ***
 //!
@@ -61,8 +58,9 @@
 //! };
 //!
 //! // Create a Disruptor with a ring buffer of size 8 and use the `BusySpin` wait strategy.
-//! let mut builder = disruptor::build_single_producer(8, factory, BusySpin);
-//! let mut producer = builder.handle_events_with(processor).build();
+//! let mut producer = build_single_producer(8, factory, BusySpin)
+//!     .handle_events_with(processor)
+//!     .build();
 //!
 //! // *** Phase PUBLISH ***
 //!
@@ -93,16 +91,16 @@ mod ringbuffer;
 mod producer;
 mod builder;
 
-pub use builder::{build_single_producer, build_multi_producer, Builder, DependencyChain};
-pub use producer::{Producer, RingBufferFull};
-pub use wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
+pub use crate::builder::{build_single_producer, build_multi_producer, ProcessorSettings};
+pub use crate::producer::{Producer, RingBufferFull};
+pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use std::collections::HashSet;
 	use std::sync::mpsc;
 	use std::thread;
+	use super::*;
 
 	#[derive(Debug)]
 	struct Event {
@@ -112,7 +110,6 @@ mod tests {
 	#[test]
 	#[should_panic(expected = "Size must be power of 2.")]
 	fn size_not_a_factor_of_2() {
-		std::panic::set_hook(Box::new(|_| {})); // To avoid backtrace in console.
 		build_single_producer(3, || { 0 }, BusySpin);
 	}
 
@@ -226,7 +223,7 @@ mod tests {
 		let factory      = || { Event { num: -1 }};
 		let builder      = build_single_producer(8, factory, BusySpin);
 		let mut producer = builder
-			.handle_events_with(processor1)
+			.pined_at_core(1).thread_named("my_thread").handle_events_with(processor1)
 			.handle_events_with(processor2)
 			.handle_events_with(processor3)
 			.build();
@@ -272,5 +269,63 @@ mod tests {
 
 		let result: Vec<i64> = r.iter().collect();
 		assert_eq!(vec![1, 2, 3], result);
+	}
+
+	#[test]
+	fn mpmc_with_dependent_consumers() {
+		let (s, r) = mpsc::channel();
+
+		let processor1 = {
+			let s = s.clone();
+			move |e: &Event, _, _| { s.send(e.num + 1).unwrap(); }
+		};
+		let processor2 = {
+			let s = s.clone();
+			move |e: &Event, _, _| { s.send(e.num + 2).unwrap(); }
+		};
+		let processor3 = {
+			let s = s.clone();
+			move |e: &Event, _, _| { s.send(e.num + 3).unwrap(); }
+		};
+		let processor4 = {
+			let s = s.clone();
+			move |e: &Event, _, _| { s.send(e.num + 4).unwrap(); }
+		};
+		let processor5 = {
+			let s = s.clone();
+			move |e: &Event, _, _| { s.send(e.num + 5).unwrap(); }
+		};
+		let processor6 = {
+			move |e: &Event, _, _| { s.send(e.num + 6).unwrap(); }
+		};
+
+		let factory      = || { Event { num: -1 }};
+		let builder      = build_multi_producer(8, factory, BusySpin);
+		let mut producer1 = builder
+			.handle_events_with(processor1)
+			.handle_events_with(processor2)
+			.and_then()
+				.handle_events_with(processor3)
+				.handle_events_with(processor4)
+				.and_then()
+					.handle_events_with(processor5)
+					.handle_events_with(processor6)
+			.build();
+
+		let mut producer2 = producer1.clone();
+
+		thread::scope(|s| {
+			s.spawn(move || {
+				producer1.publish(|e| e.num = 0);
+			});
+
+			s.spawn(move || {
+				producer2.publish(|e| e.num = 10);
+			});
+		});
+
+		let mut result: Vec<i64> = r.iter().collect();
+		result.sort();
+		assert_eq!(vec![1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16], result);
 	}
 }

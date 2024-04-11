@@ -4,8 +4,7 @@ pub mod single;
 pub mod multi;
 
 use std::sync::{atomic::AtomicI64, Arc};
-use crossbeam_utils::CachePadded;
-use crate::{barrier::Barrier, consumer::{Consumer, ConsumerBarrier}, ringbuffer::RingBuffer, Sequence};
+use crate::{barrier::Barrier, Sequence};
 
 /// Barrier for producers.
 #[doc(hidden)]
@@ -39,16 +38,7 @@ pub struct RingBufferFull;
 /// application instead of sending latent data out. (Of course appropriate action should be taken to
 /// make e.g. prices indicative in a price engine or cancel all open orders in a trading
 /// application before panicking.)
-pub trait Producer<E, P> {
-	#[doc(hidden)]
-	fn new(
-		shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
-		ring_buffer:          *mut RingBuffer<E>,
-		producer_barrier:     Arc<P>,
-		consumers:            Vec<Consumer>,
-		consumer_barrier:     ConsumerBarrier,
-	) -> Self;
-
+pub trait Producer<E> {
 	/// Publish an Event into the Disruptor.
 	///
 	/// Returns a `Result` with the published sequence number or a [RingBufferFull] in case the
@@ -57,9 +47,7 @@ pub trait Producer<E, P> {
 	/// # Examples
 	///
 	/// ```
-	///# use disruptor::Producer;
-	///# use disruptor::BusySpin;
-	///# use disruptor::RingBufferFull;
+	///# use disruptor::*;
 	///#
 	/// // The example data entity on the ring buffer.
 	/// struct Event {
@@ -68,8 +56,9 @@ pub trait Producer<E, P> {
 	///# fn main() -> Result<(), RingBufferFull> {
 	/// let factory = || { Event { price: 0.0 }};
 	///# let processor = |e: &Event, _, _| {};
-	///# let mut builder = disruptor::build_single_producer(8, factory, BusySpin);
-	///# let mut producer = builder.handle_events_with(processor).build();
+	///# let mut producer = build_single_producer(8, factory, BusySpin)
+	///#     .handle_events_with(processor)
+	///#     .build();
 	/// producer.try_publish(|e| { e.price = 42.0; })?;
 	///# Ok(())
 	///# }
@@ -86,9 +75,7 @@ pub trait Producer<E, P> {
 	/// # Examples
 	///
 	/// ```
-	///# use disruptor::Producer;
-	///# use disruptor::BusySpin;
-	///# use disruptor::RingBufferFull;
+	///# use disruptor::*;
 	///#
 	/// // The example data entity on the ring buffer.
 	/// struct Event {
@@ -96,8 +83,9 @@ pub trait Producer<E, P> {
 	/// }
 	/// let factory = || { Event { price: 0.0 }};
 	///# let processor = |e: &Event, _, _| {};
-	///# let mut builder = disruptor::build_single_producer(8, factory, BusySpin);
-	///# let mut producer = builder.handle_events_with(processor).build();
+	///# let mut producer = build_single_producer(8, factory, BusySpin)
+	///#     .handle_events_with(processor)
+	///#     .build();
 	/// producer.publish(|e| { e.price = 42.0; });
 	/// ```
 	///

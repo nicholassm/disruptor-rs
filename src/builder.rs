@@ -1,67 +1,28 @@
 //! Module for building the Disruptor and adding event handlers.
 
-use std::{marker::PhantomData, sync::{atomic::{fence, AtomicI64, Ordering}, Arc}, thread};
+use std::{sync::{atomic::{fence, AtomicI64, Ordering}, Arc}, thread};
 use core_affinity::CoreId;
 use crossbeam_utils::CachePadded;
 use crate::{affinity::{cpu_has_core_else_panic, set_affinity_if_defined}, barrier::{Barrier, NONE}, Sequence};
-use crate::consumer::{Consumer, ConsumerBarrier};
+use crate::consumer::Consumer;
 use crate::cursor::Cursor;
-use crate::producer::{Producer, single::{SingleProducer, SingleProducerBarrier}, multi::{MultiProducer, MultiProducerBarrier}, ProducerBarrier};
+use crate::producer::{single::SingleProducerBarrier, multi::MultiProducerBarrier};
 use crate::ringbuffer::RingBuffer;
 use crate::wait_strategies::WaitStrategy;
 
+use self::{multi::MPBuilder, single::SPBuilder};
+
+pub mod single;
+pub mod multi;
+
 /// Build a single producer Disruptor. Use this if you only need to publish events from one thread.
 ///
-/// For using a producer see [`Producer`].
-pub fn build_single_producer<E, W, F>(size: usize, event_factory: F, wait_strategy: W)
--> Builder<E, W, SingleProducerBarrier, SingleProducer<E, SingleProducerBarrier>>
-where
-	F: FnMut() -> E,
-	E: 'static,
-	W: 'static + WaitStrategy,
-{
-	let producer_barrier = SingleProducerBarrier::new();
-	Builder::new(size, event_factory, wait_strategy, producer_barrier)
-}
-
-/// Build a multi producer Disruptor. Use this if you need to publish events from many threads.
-///
-/// For using a producer see [`Producer`].
-pub fn build_multi_producer<E, W, F>(size: usize, event_factory: F, wait_strategy: W)
--> Builder<E, W, MultiProducerBarrier, MultiProducer<E, MultiProducerBarrier>>
-where
-	F: FnMut() -> E,
-	E: 'static,
-	W: 'static + WaitStrategy,
-{
-	let producer_barrier = MultiProducerBarrier::new(size);
-	Builder::new(size, event_factory, wait_strategy, producer_barrier)
-}
-
-/// Part of the builder api. Adds a barrier so that further added event handlers
-/// will process the events after all previously added event handlers. As such,
-/// the barriers form a chain of dependencies between event handlers.
-///
-/// See [`Builder`] for examples of usage (they have the same methods).
-pub struct DependencyChain<E, W, P, PR>
-where
-	PR: Producer<E, P>
-{
-	builder:           Builder<E, W, P, PR>,
-	dependent_barrier: Arc<ConsumerBarrier>,
-	consumer_barrier:  Option<ConsumerBarrier>,
-}
-
-/// Builder used for configuring and constructing a Disruptor including setting
-/// consumer thread names and affinities.
+/// For using a producer see [Producer](crate::producer::Producer).
 ///
 /// # Examples
 ///
 /// ```
-///# use disruptor::build_single_producer;
-///# use disruptor::Producer;
-///# use disruptor::BusySpin;
-///# use disruptor::RingBufferFull;
+///# use disruptor::*;
 ///#
 /// // The example data entity on the ring buffer.
 /// struct Event {
@@ -71,26 +32,171 @@ where
 ///# let processor1 = |e: &Event, _, _| {};
 ///# let processor2 = |e: &Event, _, _| {};
 ///# let processor3 = |e: &Event, _, _| {};
-/// let mut producer = disruptor::build_single_producer(8, factory, BusySpin)
-///    .pined_at_core(1).thread_named("my_processor").handle_events_with(processor1)
-///    .handle_events_with(processor2) // Not pinned and thread getting a generic name.
+/// let mut producer = build_single_producer(8, factory, BusySpin)
+///    .handle_events_with(processor1)
+///    .handle_events_with(processor2)
 ///    .and_then()
 ///        // `processor3` only reads events after the other two processors are done reading.
-///        .pined_at_core(2).handle_events_with(processor3) // Pined but with a generic name.
+///        .handle_events_with(processor3)
+///    .build();
+///
+/// // Now use the `producer` to publish events.
+/// ```
+pub fn build_single_producer<E, W, F>(size: usize, event_factory: F, wait_strategy: W)
+-> SPBuilder<E, W, SingleProducerBarrier>
+where
+	F: FnMut() -> E,
+	E: 'static,
+	W: 'static + WaitStrategy,
+{
+	let producer_barrier  = Arc::new(SingleProducerBarrier::new());
+	let dependent_barrier = Arc::clone(&producer_barrier);
+	SPBuilder::new(size, event_factory, wait_strategy, producer_barrier, dependent_barrier)
+}
+
+/// Build a multi producer Disruptor. Use this if you need to publish events from many threads.
+///
+/// For using a producer see [Producer](crate::producer::Producer).
+///
+/// # Examples
+///
+/// ```
+///# use disruptor::*;
+///#
+/// // The example data entity on the ring buffer.
+/// struct Event {
+///     price: f64
+/// }
+/// let factory = || { Event { price: 0.0 }};
+///# let processor1 = |e: &Event, _, _| {};
+///# let processor2 = |e: &Event, _, _| {};
+///# let processor3 = |e: &Event, _, _| {};
+/// let mut producer1 = build_multi_producer(8, factory, BusySpin)
+///    .handle_events_with(processor1)
+///    .handle_events_with(processor2)
+///    .and_then()
+///        // `processor3` only reads events after the other two processors are done reading.
+///        .handle_events_with(processor3)
+///    .build();
+///
+/// let mut producer2 = producer1.clone();
+///
+/// // Now two threads can get a Producer each.
+/// ```
+pub fn build_multi_producer<E, W, F>(size: usize, event_factory: F, wait_strategy: W)
+-> MPBuilder<E, W, MultiProducerBarrier>
+where
+	F: FnMut() -> E,
+	E: 'static,
+	W: 'static + WaitStrategy,
+{
+	let producer_barrier  = Arc::new(MultiProducerBarrier::new(size));
+	let dependent_barrier = Arc::clone(&producer_barrier);
+	MPBuilder::new(size, event_factory, wait_strategy, producer_barrier, dependent_barrier)
+}
+
+/// The processor's thread name and CPU affinity can be set via the builders that implement this trait.
+///
+/// # Examples
+///
+/// ```
+///# use disruptor::*;
+///#
+/// // The example data entity on the ring buffer.
+/// struct Event {
+///     price: f64
+/// }
+/// let factory = || { Event { price: 0.0 }};
+///# let processor1 = |e: &Event, _, _| {};
+///# let processor2 = |e: &Event, _, _| {};
+///# let processor3 = |e: &Event, _, _| {};
+/// let mut producer = build_single_producer(8, factory, BusySpin)
+///    // Processor 1 is pined and has a custom name.
+///    .pined_at_core(1).thread_named("my_processor").handle_events_with(processor1)
+///    // Processor 2 is not pined and gets a generic name.
+///    .handle_events_with(processor2)
+///    // Processor 3 is pined and gets a generic name.
+///    .pined_at_core(2).handle_events_with(processor3)
 ///    .build();
 /// ```
-pub struct Builder<E, W, P, PR>
+pub trait ProcessorSettings<E, W>: Sized {
+	#[doc(hidden)]
+	fn shared(&mut self) -> &mut Shared<E, W>;
+
+	/// Pin processor thread on the core with `id` for the next added event handler.
+	/// Outputs an error on stderr if the thread could not be pinned.
+	fn pined_at_core(mut self, id: usize) -> Self {
+		self.shared().pined_at_core(id);
+		self
+	}
+
+	/// Set a name for the processor thread for the next added event handler.
+	fn thread_named(mut self, name: &'static str) -> Self {
+		self.shared().thread_named(name);
+		self
+	}
+}
+
+trait Builder<E, W, B>: ProcessorSettings<E, W>
 where
-	PR: Producer<E, P>
+	B: 'static + Barrier,
+	W: 'static + WaitStrategy,
+	E: 'static
 {
+	fn add_event_handler<EH>(&mut self, event_handler: EH)
+	where
+		EH: 'static + Send + FnMut(&E, Sequence, bool)
+	{
+		let barrier            = self.dependent_barrier();
+		let (cursor, consumer) = start_processor(event_handler, self.shared(), barrier);
+		self.shared().add_consumer(consumer, cursor);
+	}
+
+	fn dependent_barrier(&self) -> Arc<B>;
+}
+
+#[doc(hidden)]
+pub struct Shared<E, W> {
 	pub(crate) shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
 	pub(crate) ring_buffer:          *mut RingBuffer<E>,
-	pub(crate) producer_barrier:     Arc<P>,
 	pub(crate) consumers:            Vec<Consumer>,
-	phantom_data:                    PhantomData<PR>,
+	current_consumer_cursors:        Option<Vec<Arc<Cursor>>>,
 	wait_strategy:                   W,
-	consumer_barrier:                Option<ConsumerBarrier>,
 	thread_context:                  ThreadContext,
+}
+
+impl <E, W> Shared<E, W> {
+	fn new<F>(size: usize, event_factory: F, wait_strategy: W) -> Self
+	where
+		F: FnMut() -> E
+	{
+		let ring_buffer              = Box::into_raw(Box::new(RingBuffer::new(size, event_factory)));
+		let shutdown_at_sequence     = Arc::new(CachePadded::new(AtomicI64::new(NONE)));
+		let current_consumer_cursors = Some(vec![]);
+
+		Self {
+			ring_buffer,
+			wait_strategy,
+			shutdown_at_sequence,
+			current_consumer_cursors,
+			consumers: vec![],
+			thread_context: ThreadContext::default(),
+		}
+	}
+
+	fn add_consumer(&mut self, consumer: Consumer, cursor: Arc<Cursor>) {
+		self.consumers.push(consumer);
+		self.current_consumer_cursors.as_mut().unwrap().push(cursor);
+	}
+
+	fn pined_at_core(&mut self, id: usize) {
+		cpu_has_core_else_panic(id);
+		self.thread_context.affinity = Some(CoreId { id } );
+	}
+
+	fn thread_named(&mut self, name: &'static str) {
+		self.thread_context.name = Some(name.to_owned());
+	}
 }
 
 #[derive(Default)]
@@ -122,143 +228,9 @@ impl<E> RingBufferWrapper<E> {
 	}
 }
 
-impl <E, W, P, PR> Builder<E, W, P, PR>
-where
-	E:  'static,
-	P:  'static + Send + Sync + ProducerBarrier + Barrier,
-	W:  'static + WaitStrategy,
-	PR: Producer<E, P>,
-{
-	fn new<F>(size: usize, event_factory: F, wait_strategy: W, producer_barrier: P) -> Self
-	where
-		F: FnMut() -> E
-	{
-		let ring_buffer          = Box::into_raw(Box::new(RingBuffer::new(size, event_factory)));
-		let producer_barrier     = Arc::new(producer_barrier);
-		let shutdown_at_sequence = Arc::new(CachePadded::new(AtomicI64::new(NONE)));
-		let consumer_barrier     = Some(ConsumerBarrier::new());
-
-		Builder {
-			ring_buffer,
-			wait_strategy,
-			shutdown_at_sequence,
-			producer_barrier,
-			consumer_barrier,
-			consumers: vec![],
-			phantom_data: PhantomData,
-			thread_context: ThreadContext::default(),
-		}
-	}
-
-	/// Pin processor thread on the core with `id` for the next added event handler.
-	/// Outputs an error on stderr if the thread could not be pinned.
-	pub fn pined_at_core(mut self, id: usize) -> Self {
-		cpu_has_core_else_panic(id);
-		self.thread_context.affinity = Some(CoreId { id } );
-		self
-	}
-
-	/// Set a name for the processor thread for the next added event handler.
-	pub fn thread_named(mut self, name: &'static str) -> Self {
-		self.thread_context.name = Some(name.to_owned());
-		self
-	}
-
-	/// Add an event handler.
-	pub fn handle_events_with<EP>(mut self, event_handler: EP) -> Self
-	where
-		EP: 'static + Send + FnMut(&E, Sequence, bool)
-	{
-		let barrier            = Arc::clone(&self.producer_barrier);
-		let (cursor, consumer) = start_processor(event_handler, &mut self, barrier);
-		self.consumers.push(consumer);
-		self.consumer_barrier.as_mut().unwrap().add(cursor);
-		self
-	}
-
-	/// Complete the (concurrent) consumption of events so far and let new consumers process
-	/// events after all previous consumers have read them.
-	pub fn and_then(mut self) -> DependencyChain<E, W, P, PR> {
-		let dependent_barrier = Arc::new(self.consumer_barrier.take().unwrap());
-		let consumer_barrier  = Some(ConsumerBarrier::new());
-		DependencyChain {
-			builder: self,
-			dependent_barrier,
-			consumer_barrier
-		}
-	}
-
-	/// Finish the build and get the producer used for publication.
-	pub fn build(mut self) -> PR {
-		let consumer_barrier = self.consumer_barrier.take().unwrap();
-		PR::new(
-			self.shutdown_at_sequence,
-			self.ring_buffer,
-			self.producer_barrier,
-			self.consumers,
-			consumer_barrier)
-	}
-}
-
-impl <E, W, P, PR> DependencyChain<E, W, P, PR>
-where
-	E:  'static,
-	P:  'static + Send + Sync + ProducerBarrier + Barrier,
-	W:  'static + WaitStrategy,
-	PR: Producer<E, P>,
-{
-	/// Add an event handler.
-	pub fn handle_events_with<EP>(mut self, event_handler: EP) -> Self
-	where
-		EP: 'static + Send + FnMut(&E, Sequence, bool)
-	{
-		let barrier            = Arc::clone(&self.dependent_barrier);
-		let (cursor, consumer) = start_processor(event_handler, &mut self.builder, barrier);
-		self.builder.consumers.push(consumer);
-		self.consumer_barrier.as_mut().unwrap().add(cursor);
-		self
-	}
-
-	/// Pin processor thread on the core with `id` for the next added event handler.
-	/// Outputs an error on stderr if the thread could not be pinned.
-	pub fn pined_at_core(mut self, id: usize) -> Self {
-		self.builder = self.builder.pined_at_core(id);
-		self
-	}
-
-	/// Set a name for the processor thread for the next added event handler.
-	pub fn thread_named(mut self, name: &'static str) -> Self {
-		self.builder = self.builder.thread_named(name);
-		self
-	}
-
-	/// Complete the (concurrent) consumption of events so far and let new consumers process
-	/// events after all previous consumers have read them.
-	pub fn and_then(mut self) -> DependencyChain<E, W, P, PR> {
-		let dependent_barrier = Arc::new(self.consumer_barrier.take().unwrap());
-		let consumer_barrier  = Some(ConsumerBarrier::new());
-		DependencyChain {
-			builder: self.builder,
-			dependent_barrier,
-			consumer_barrier
-		}
-	}
-
-	/// Finish the build and get the producer used for publication.
-	pub fn build(mut self) -> PR {
-		let consumer_barrier = self.consumer_barrier.take().unwrap();
-		PR::new(
-			self.builder.shutdown_at_sequence,
-			self.builder.ring_buffer,
-			self.builder.producer_barrier,
-			self.builder.consumers,
-			consumer_barrier)
-	}
-}
-
-fn start_processor<E, EP, W, B, P, PR: Producer<E, P>> (
+fn start_processor<E, EP, W, B> (
 	mut event_handler: EP,
-	builder:           &mut Builder<E, W, P, PR>,
+	builder:           &mut Shared<E, W>,
 	barrier:           Arc<B>)
 -> (Arc<Cursor>, Consumer)
 where

@@ -13,16 +13,14 @@ It's heavily inspired by the brilliant
 
 Add the following to your `Cargo.toml` file:
 
-    disruptor = "0.6.1"
+    disruptor = "0.7.0"
 
 To read details of how to use the library, check out the documentation on [docs.rs/disruptor](https://docs.rs/disruptor).
 
 Here's a minimal example:
 
 ```rust
-use disruptor::Sequence;
-use disruptor::BusySpin;
-use disruptor::Producer;
+use disruptor::*;
 
 // The event on the ring buffer.
 struct Event {
@@ -39,8 +37,7 @@ fn main() {
     };
 
     let size = 64;
-    let mut producer =
-        disruptor::build_single_producer(size, factory, BusySpin)
+    let mut producer = disruptor::build_single_producer(size, factory, BusySpin)
         .handle_events_with(processor)
         .build();
 
@@ -59,9 +56,7 @@ The library also supports pinning threads on cores to avoid latency induced by c
 A more advanced usage demonstrating this and with multiple producers and multiple interdependent consumers could look like this:
 
 ```rust
-use disruptor::Sequence;
-use disruptor::BusySpin;
-use disruptor::Producer;
+use disruptor::*;
 
 // The event on the ring buffer.
 struct Event {
@@ -83,8 +78,7 @@ fn main() {
         // More processing logic here.
     };
 
-    let mut producer1 =
-        disruptor::build_multi_producer(64, factory, BusySpin)
+    let mut producer1 = disruptor::build_multi_producer(64, factory, BusySpin)
         // `h2` handles events concurrently with `h1`.
         .pin_at_core(1).handle_events_with(h1)
         .pin_at_core(2).handle_events_with(h2)
@@ -131,8 +125,7 @@ fn main() {
 # Design Choices
 
 Everything in the library is about low-latency and this heavily influences all choices made in this library.
-As an example, you cannot allocate an event and *move* that into the ringbuffer. Instead, events
-are allocated on startup to ensure they are co-located in memory to increase cache coherency.
+As an example, you cannot allocate an event and *move* that into the ringbuffer. Instead, events are allocated on startup to ensure they are co-located in memory to increase cache coherency.
 However, you can still allocate a struct on the heap and move ownership to a field in the event on the Ringbuffer.
 As long as you realize that this can add latency, because the struct is allocated by one thread and dropped by another.
 Hence, there's synchronization happening in the allocator.
@@ -143,14 +136,11 @@ There's also no use of dynamic dispatch - everything is monomorphed.
 
 The SPSC Disruptor variant has been benchmarked and compared to Crossbeam. See the code in the `benches/spsc.rs` file.
 
-The results below are gathered from running the benchmarks on a 2016 Macbook Pro running a 2,6 GHz Quad-Core Intel
-Core i7. So on a modern Intel Xeon the numbers should be even better. Furthermore, it's not possible to isolate cores
-on Mac and pin threads which would produce even more stable results. This is future work.
+The results below are gathered from running the benchmarks on a 2016 Macbook Pro running a 2,6 GHz Quad-Core Intel Core i7. So on a modern Intel Xeon the numbers should be even better. Furthermore, it's not possible to isolate cores on Mac and pin threads which would produce even more stable results. This is future work.
 
 If you have any suggestions to improving the benchmarks, please feel free to open an issue.
 
-To provide a somewhat realistic benchmark not only burst of different sizes are considered but also variable pauses
-between bursts: 0 ms, 1 ms and 10 ms.
+To provide a somewhat realistic benchmark not only burst of different sizes are considered but also variable pauses between bursts: 0 ms, 1 ms and 10 ms.
 
 The latencies below are the median latency per element.
 
@@ -222,12 +212,9 @@ The latencies below are the median latency per element.
 
 ## Conclusion
 
-There's clearly a difference between the Disruptor and the Crossbeam libs. However, this is not because the Crossbeam
-library is not a great piece of software. It is. The Disruptor trades CPU and memory resources for lower latency and
-higher throughput and that is why it's able to achieve these results.
+There's clearly a difference between the Disruptor and the Crossbeam libs. However, this is not because the Crossbeam library is not a great piece of software. It is. The Disruptor trades CPU and memory resources for lower latency and higher throughput and that is why it's able to achieve these results.
 
-Both libraries greatly improves as the burst size goes up but the Disruptor's performance is more resilient to the
-pauses between bursts which is one of the design goals.
+Both libraries greatly improves as the burst size goes up but the Disruptor's performance is more resilient to the pauses between bursts which is one of the design goals.
 
 
 # Related Work
@@ -236,12 +223,10 @@ There are multiple other Rust projects that mimic the LMAX Disruptor library:
 1. [Turbine](https://github.com/polyfractal/Turbine)
 2. [Disrustor](https://github.com/sklose/disrustor)
 
-A key feature that this library supports is multiple producers from different threads
-that neither of the above libraries support (at the time of writing).
+A key feature that this library supports is multiple producers from different threads that neither of the above libraries support (at the time of writing).
 
 # Roadmap
 
-1. Add specialization of the `ConsumerBarrier` when there's only a single consumer.
-2. Verify correctness with Miri.
-3. Add a Sleeping Wait Strategy.
-4. Support for batch publication.
+1. Verify correctness with Miri.
+2. Add a Sleeping Wait Strategy.
+3. Support for batch publication.

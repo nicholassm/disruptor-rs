@@ -1,6 +1,6 @@
 use std::{process, sync::{atomic::{fence, AtomicI32, AtomicI64, Ordering}, Arc, Mutex}};
 use crossbeam_utils::CachePadded;
-use crate::{barrier::{Barrier, NONE}, consumer::{Consumer, ConsumerBarrier}, producer::ProducerBarrier, ringbuffer::RingBuffer, Producer, RingBufferFull, Sequence};
+use crate::{barrier::{Barrier, NONE}, consumer::Consumer, producer::ProducerBarrier, ringbuffer::RingBuffer, producer::{Producer, RingBufferFull}, Sequence};
 use crate::cursor::Cursor;
 
 struct SharedProducer {
@@ -12,12 +12,12 @@ struct SharedProducer {
 ///
 /// See also [SingleProducer](crate::single_producer::SingleProducer) for single-threaded publication and
 /// [`Producer`] for how to use a Producer.
-pub struct MultiProducer<E, P: ProducerBarrier + Barrier> {
+pub struct MultiProducer<E, C> {
 	shutdown_at_sequence:        Arc<CachePadded<AtomicI64>>,
 	ring_buffer:                 *mut RingBuffer<E>,
 	shared_producer:             Arc<Mutex<SharedProducer>>,
-	producer_barrier:            Arc<P>,
-	consumer_barrier:            Arc<ConsumerBarrier>,
+	producer_barrier:            Arc<MultiProducerBarrier>,
+	consumer_barrier:            Arc<C>,
 	/// Next sequence number for this MultiProducer to publish.
 	claimed_sequence:            Sequence,
 	/// Highest sequence available for publication because the Consumers are "enough" behind
@@ -25,22 +25,10 @@ pub struct MultiProducer<E, P: ProducerBarrier + Barrier> {
 	sequence_clear_of_consumers: Sequence,
 }
 
-impl<E, P: ProducerBarrier> Producer<E, P> for MultiProducer<E, P> {
-	fn new(
-		shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
-		ring_buffer:          *mut RingBuffer<E>,
-		producer_barrier:     Arc<P>,
-		consumers:            Vec<Consumer>,
-		consumer_barrier:     ConsumerBarrier,
-	) -> Self {
-		MultiProducer::new(
-			shutdown_at_sequence,
-			ring_buffer,
-			producer_barrier,
-			consumers,
-			consumer_barrier)
-	}
-
+impl<E, C> Producer<E> for MultiProducer<E, C>
+where
+	C: Barrier
+{
 	#[inline]
 	fn try_publish<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull>
 	where
@@ -60,9 +48,9 @@ impl<E, P: ProducerBarrier> Producer<E, P> for MultiProducer<E, P> {
 	}
 }
 
-unsafe impl<E: Send, P: ProducerBarrier + Barrier> Send for MultiProducer<E, P> {}
+unsafe impl<E: Send, C> Send for MultiProducer<E, C> {}
 
-impl<E, P: ProducerBarrier> Clone for MultiProducer<E, P> {
+impl<E, C> Clone for MultiProducer<E, C> {
 	fn clone(&self) -> Self {
 		let shared = self.shared_producer.lock().unwrap();
 		let count  = shared.counter.fetch_add(1, Ordering::AcqRel);
@@ -91,7 +79,7 @@ impl<E, P: ProducerBarrier> Clone for MultiProducer<E, P> {
 	}
 }
 
-impl<E, P: ProducerBarrier> Drop for MultiProducer<E, P> {
+impl<E, C> Drop for MultiProducer<E, C> {
 	fn drop(&mut self) {
 		let mut shared = self.shared_producer.lock().unwrap();
 		let old_count  = shared.counter.fetch_sub(1, Ordering::AcqRel);
@@ -109,13 +97,16 @@ impl<E, P: ProducerBarrier> Drop for MultiProducer<E, P> {
 	}
 }
 
-impl<E, P: ProducerBarrier> MultiProducer<E, P> {
-	fn new(
+impl<E, C> MultiProducer<E, C>
+where
+	C: Barrier
+{
+	pub(crate) fn new(
 		shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
 		ring_buffer:          *mut RingBuffer<E>,
-		producer_barrier:     Arc<P>,
+		producer_barrier:     Arc<MultiProducerBarrier>,
 		consumers:            Vec<Consumer>,
-		consumer_barrier:     ConsumerBarrier,
+		consumer_barrier:     C,
 	) -> Self
 	{
 		let shared_producer = Arc::new(
@@ -158,7 +149,7 @@ impl<E, P: ProducerBarrier> MultiProducer<E, P> {
 			// publish into the slot currently being read by the consumer.
 			// (Consumer is an entire ring buffer behind the producer).
 			let wrap_point                 = ring_buffer.wrap_point(sequence);
-			let lowest_sequence_being_read = self.consumer_barrier.get() + 1;
+			let lowest_sequence_being_read = self.consumer_barrier.get_after(sequence) + 1;
 			// `<=` because a producer can claim a sequence number that a consumer is still using
 			// before the wrap_point. (Compare with the single-threaded Producer that cannot claim
 			// a sequence number beyond the wrap_point).

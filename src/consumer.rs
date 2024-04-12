@@ -37,6 +37,7 @@ impl SingleConsumerBarrier {
 }
 
 impl Barrier for SingleConsumerBarrier {
+	#[inline]
 	fn get_after(&self, _lower_bound: Sequence) -> Sequence {
 		self.cursor.relaxed_value()
 	}

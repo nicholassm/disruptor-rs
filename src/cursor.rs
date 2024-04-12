@@ -14,14 +14,17 @@ impl Cursor {
 		}
 	}
 
+	#[inline]
 	pub(crate) fn next(&self) -> Sequence {
 		self.counter.fetch_add(1, Ordering::AcqRel) + 1
 	}
 
+	#[inline]
 	pub(crate) fn store(&self, sequence: Sequence) {
 		self.counter.store(sequence, Ordering::Release);
 	}
 
+	#[inline]
 	pub(crate) fn relaxed_value(&self) -> Sequence {
 		self.counter.load(Ordering::Relaxed)
 	}

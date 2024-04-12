@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{fence, Ordering};
 use crate::{barrier::{Barrier, NONE}, cursor::Cursor, producer::ProducerBarrier};
 use crossbeam_utils::CachePadded;
 use crate::{consumer::Consumer, ringbuffer::RingBuffer, Sequence};
@@ -84,6 +84,7 @@ where
 			if lowest_sequence_being_read == wrap_point {
 				return Err(RingBufferFull);
 			}
+			fence(Ordering::Acquire);
 
 			// We can now continue until we get right behind the slowest consumer's current
 			// position without checking where it actually is.

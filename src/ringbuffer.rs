@@ -39,7 +39,10 @@ impl <E> RingBuffer<E> {
 	#[inline]
 	pub(crate) fn get(&self, sequence: Sequence) -> *mut E {
 		let index = (sequence & self.index_mask) as usize;
-		self.buffer[index].get()
+		// SAFETY: Index is within bounds - guaranteed by invariant and index mask.
+		unsafe {
+			self.buffer.get_unchecked(index).get()
+		}
 	}
 
 	#[inline]

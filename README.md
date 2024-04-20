@@ -225,6 +225,12 @@ There are multiple other Rust projects that mimic the LMAX Disruptor library:
 
 A key feature that this library supports is multiple producers from different threads that neither of the above libraries support (at the time of writing).
 
+# Contributions
+
+You are welcome to create a Pull-Request or open an issue with suggestions for improvements.
+
+Changes are accepted solely at my discretion and I will focus on whether the changes are a good fit for the purpose and design of this crate.
+
 # Roadmap
 
 1. Verify correctness with Miri.

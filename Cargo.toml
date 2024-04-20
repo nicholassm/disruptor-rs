@@ -7,7 +7,7 @@ license       = "MIT"
 authors       = ["Nicholas <nicholassm@gmail.com>"]
 repository    = "https://github.com/nicholassm/disruptor-rs"
 categories    = ["data-structures", "concurrency"]
-keywords      = ["disruptor", "ringbuffer"]
+keywords      = ["disruptor", "ringbuffer", "message", "mpmc"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

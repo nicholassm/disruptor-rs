@@ -142,7 +142,7 @@ If you have any suggestions to improving the benchmarks, please feel free to ope
 
 To provide a somewhat realistic benchmark not only burst of different sizes are considered but also variable pauses between bursts: 0 ms, 1 ms and 10 ms.
 
-The latencies below are the median latency per element.
+The latencies below are the mean latency per element with 95% confidence interval (standard `criterion` settings). Capturing all latencies and calculating misc. percentiles (and in particular the max latency) is future work. However, I expect the below measurements to be representative for the actual performance you can achieve in a real application.
 
 ## No Pause Between Bursts
 

@@ -118,8 +118,8 @@ mod tests {
 
     #[test]
     fn spsc_disruptor() {
-        let factory = || { Event { num: -1 } };
-        let (s, r) = mpsc::channel();
+        let factory   = || { Event { num: -1 }};
+        let (s, r)    = mpsc::channel();
         let processor = move |e: &Event, _, _| {
             s.send(e.num).expect("Should be able to send.");
         };
@@ -130,7 +130,7 @@ mod tests {
         thread::scope(|s| {
             s.spawn(move || {
                 for i in 0..10 {
-                    producer.publish(|e| e.num = i * i);
+                    producer.publish(|e| e.num = i*i );
                 }
             });
         });
@@ -141,8 +141,8 @@ mod tests {
 
     #[test]
     fn pipeline_of_two_spsc_disruptors() {
-        let factory = || { Event { num: -1 } };
-        let (s, r) = mpsc::channel();
+        let factory   = || { Event { num: -1 }};
+        let (s, r)    = mpsc::channel();
         let processor = move |e: &Event, _, _| {
             s.send(e.num).expect("Should be able to send.");
         };
@@ -152,7 +152,7 @@ mod tests {
             .handle_events_with(processor)
             .build();
         let processor = move |e: &Event, _, _| {
-            producer.publish(|e2| e2.num = e.num);
+            producer.publish(|e2| e2.num = e.num );
         };
 
         // First Disruptor.
@@ -162,7 +162,7 @@ mod tests {
         thread::scope(|s| {
             s.spawn(move || {
                 for i in 0..10 {
-                    producer.publish(|e| e.num = i * i);
+                    producer.publish(|e| e.num = i*i );
                 }
             });
         });
@@ -173,8 +173,8 @@ mod tests {
 
     #[test]
     fn multi_publisher_disruptor() {
-        let factory = || { Event { num: -1 } };
-        let (s, r) = mpsc::channel();
+        let factory   = || { Event { num: -1 }};
+        let (s, r)    = mpsc::channel();
         let processor = move |e: &Event, _, _| {
             s.send(e.num).expect("Should be able to send.");
         };
@@ -188,13 +188,13 @@ mod tests {
 
         thread::scope(|s| {
             s.spawn(move || {
-                for i in 0..num_items / 2 {
+                for i in 0..num_items/2 {
                     producer1.publish(|e| e.num = i);
                 }
             });
 
             s.spawn(move || {
-                for i in (num_items / 2)..num_items {
+                for i in (num_items/2)..num_items {
                     producer2.publish(|e| e.num = i);
                 }
             });
@@ -223,8 +223,8 @@ mod tests {
             move |e: &Event, _, _| { s.send(e.num + 3).unwrap(); }
         };
 
-        let factory = || { Event { num: -1 } };
-        let builder = build_single_producer(8, factory, BusySpin);
+        let factory      = || { Event { num: -1 }};
+        let builder      = build_single_producer(8, factory, BusySpin);
         let mut producer = builder
             .pined_at_core(1).thread_named("my_thread").handle_events_with(processor1)
             .handle_events_with(processor2)
@@ -256,8 +256,8 @@ mod tests {
             move |e: &Event, _, _| { s.send(e.num + 3).unwrap(); }
         };
 
-        let factory = || { Event { num: -1 } };
-        let builder = build_single_producer(8, factory, BusySpin);
+        let factory      = || { Event { num: -1 }};
+        let builder      = build_single_producer(8, factory, BusySpin);
         let mut producer = builder
             .handle_events_with(processor1)
             .and_then()
@@ -302,8 +302,8 @@ mod tests {
             move |e: &Event, _, _| { s.send(e.num + 6).unwrap(); }
         };
 
-        let factory = || { Event { num: -1 } };
-        let builder = build_multi_producer(8, factory, BusySpin);
+        let factory      = || { Event { num: -1 }};
+        let builder      = build_multi_producer(8, factory, BusySpin);
         let mut producer1 = builder
             .handle_events_with(processor1)
             .handle_events_with(processor2)

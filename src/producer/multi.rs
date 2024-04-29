@@ -10,7 +10,7 @@ struct SharedProducer {
 
 /// Producer for publishing to the Disruptor from multiple threads.
 ///
-/// See also [SingleProducer](crate::single_producer::SingleProducer) for single-threaded publication and
+/// See also [SingleProducer](crate::SingleProducer) for single-threaded publication and
 /// [`Producer`] for how to use a Producer.
 pub struct MultiProducer<E, C> {
 	shutdown_at_sequence:        Arc<CachePadded<AtomicI64>>,

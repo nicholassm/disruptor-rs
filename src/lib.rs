@@ -94,8 +94,7 @@ mod builder;
 pub use crate::builder::{build_single_producer, build_multi_producer, ProcessorSettings};
 pub use crate::producer::{Producer, RingBufferFull};
 pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
-pub use crate::producer::multi::{MultiProducer};
-pub use crate::producer::single::{SingleProducer};
+pub use crate::producer::{single::SingleProducer, multi::MultiProducer};
 pub use crate::consumer::{SingleConsumerBarrier, MultiConsumerBarrier};
 
 #[cfg(test)]

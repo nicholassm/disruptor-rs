@@ -6,7 +6,7 @@ use super::*;
 
 /// Producer for publishing to the Disruptor from a single thread.
 ///
-/// See also [MultiProducer](crate::multi_producer::MultiProducer) for multi-threaded publication and
+/// See also [MultiProducer](crate::MultiProducer) for multi-threaded publication and
 /// [`Producer`] for how to use a Producer.
 pub struct SingleProducer<E, C> {
 	shutdown_at_sequence:        Arc<CachePadded<AtomicI64>>,

@@ -1,6 +1,6 @@
 [package]
 name          = "disruptor"
-version       = "1.0.2"
+version       = "1.1.0"
 edition       = "2021"
 description   = "Low latency inter-thread communication via a ringbuffer (inspired by the LMAX Disruptor)."
 license       = "MIT"

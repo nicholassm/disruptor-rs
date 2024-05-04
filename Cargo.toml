@@ -22,3 +22,7 @@ crossbeam = "0.8"
 [[bench]]
 name = "spsc"
 harness = false
+
+[[bench]]
+name = "spsc_mpsc_event_counters"
+harness = false

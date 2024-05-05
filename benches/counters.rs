@@ -15,7 +15,7 @@ const MAX_PRODUCER_EVENTS: usize = 10_000_000;
 fn crossbeam_spsc() {
     let (s, r) = bounded(BUF_SIZE);
 
-    // Producer 
+    // Producer
     let t1 = thread::spawn(move || {
         for _ in 0..MAX_PRODUCER_EVENTS {
             s.send(1).unwrap();
@@ -72,7 +72,6 @@ fn crossbeam_mpsc() {
     let _ = c1.join();
 
     sink.load(Ordering::Acquire);
-    //println!("crossbeam_mpsc total_events_count: {}", sink.load(Ordering::Acquire));
 }
 
 fn crossbeam_spsc_benchmark(c: &mut Criterion) {
@@ -97,7 +96,6 @@ struct Event {
 }
 
 fn disruptor_spsc() {
-
     let factory = || { Event { val: 0 }}; //to initialize disruptor
 
     let sink = Arc::new(AtomicI32::new(0)); //bcos we read and print value from main thread
@@ -115,7 +113,6 @@ fn disruptor_spsc() {
         )
         .build();
 
-
     // Publish into the Disruptor.
     thread::scope(|s| {
         s.spawn(move || {
@@ -128,7 +125,6 @@ fn disruptor_spsc() {
     });
 
     sink.load(Ordering::Acquire);
-    //println!("disruptor_spsc total_events_count: {}", sink.load(Ordering::Acquire));
 }
 
 fn disruptor_mpsc() {
@@ -171,7 +167,6 @@ fn disruptor_mpsc() {
     });
 
     sink.load(Ordering::Acquire);
-    //println!("disruptor_mpsc total_events_count: {}", sink.load(Ordering::Acquire));
 }
 
 
@@ -191,5 +186,5 @@ fn disruptor_mpsc_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, crossbeam_spsc_benchmark, disruptor_spsc_benchmark, crossbeam_mpsc_benchmark, disruptor_mpsc_benchmark);
-criterion_main!(benches);
+criterion_group!(counters, crossbeam_spsc_benchmark, disruptor_spsc_benchmark, crossbeam_mpsc_benchmark, disruptor_mpsc_benchmark);
+criterion_main!(counters);

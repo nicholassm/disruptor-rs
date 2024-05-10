@@ -8,8 +8,8 @@ use crossbeam::channel::bounded;
 use disruptor::{BusySpin, Producer};
 
 const DATA_STRUCTURE_SIZE: usize = 64;
-const BURST_SIZES: [u64; 5]      = [1, 5, 10, 50, 100];
-const PAUSES_MS: [u64; 3]        = [0, 1, 10];
+const BURST_SIZES: [u64; 3]      = [1, 10, 100];
+const PAUSES_MS: [u64; 3]        = [0,  1,  10];
 
 struct Event {
 	data: i64
@@ -27,10 +27,10 @@ pub fn spsc_benchmark(c: &mut Criterion) {
 		group.throughput(Throughput::Elements(burst_size));
 
 		// Base: Benchmark overhead of measurement logic.
-		base(&mut group, burst_size);
+		base(&mut group, burst_size as i64);
 
 		for pause_ms in PAUSES_MS.into_iter() {
-			let inputs = (burst_size, pause_ms);
+			let inputs = (burst_size as i64, pause_ms);
 			let param  = format!("burst: {}, pause: {} ms", burst_size, pause_ms);
 
 			crossbeam(&mut group, inputs, &param);
@@ -40,26 +40,25 @@ pub fn spsc_benchmark(c: &mut Criterion) {
 	group.finish();
 }
 
-fn base(group: &mut BenchmarkGroup<WallTime>, burst_size: u64) {
-	let mut data     = black_box(0);
+// Synthetic benchmark to measure the overhead of the measurement itself.
+fn base(group: &mut BenchmarkGroup<WallTime>, burst_size: i64) {
 	let sink         = Arc::new(AtomicI64::new(0));
-	let sink2        = Arc::clone(&sink);
 	let benchmark_id = BenchmarkId::new("base", burst_size);
 	group.bench_with_input(benchmark_id, &burst_size, move |b, size| b.iter_custom(|iters| {
 		let start = Instant::now();
 		for _ in 0..iters {
-			for _ in 0..*size {
-				data += 1;
-				sink.store(black_box(data), Ordering::Relaxed);
+			for data in 1..=*size {
+				sink.store(black_box(data), Ordering::Release);
 			}
-			// Wait for the last data element to be received.
-			while sink2.load(Ordering::Relaxed) != data {}
+			// Wait for the last data element to "be received".
+			let last_data = black_box(*size);
+			while sink.load(Ordering::Acquire) != last_data {}
 		}
 		start.elapsed()
 	}));
 }
 
-fn crossbeam(group: &mut BenchmarkGroup<WallTime>, inputs: (u64, u64), param: &str) {
+fn crossbeam(group: &mut BenchmarkGroup<WallTime>, inputs: (i64, u64), param: &str) {
 	// Use an AtomicI64 to "extract" the value from the receiving thread.
 	let sink     = Arc::new(AtomicI64::new(0));
 	let (s, r)   = bounded::<Event>(DATA_STRUCTURE_SIZE);
@@ -67,57 +66,53 @@ fn crossbeam(group: &mut BenchmarkGroup<WallTime>, inputs: (u64, u64), param: &s
 		let sink = Arc::clone(&sink);
 		thread::spawn(move || {
 			while let Ok(event) = r.recv() {
-				sink.store(event.data, Ordering::Relaxed);
+				sink.store(event.data, Ordering::Release);
 			}
 		})
 	};
-	let mut data     = black_box(0);
 	let benchmark_id = BenchmarkId::new("Crossbeam", &param);
 	group.bench_with_input(benchmark_id, &inputs, move |b, (size, pause_ms)| b.iter_custom(|iters| {
 		pause(*pause_ms);
 		let start = Instant::now();
 		for _ in 0..iters {
-			for _ in 0..*size {
-				data += 1;
-				s.send(Event { data }).expect("Should successfully send.");
+			for data in 1..=*size {
+				s.send(Event { data: black_box(data) }).expect("Should successfully send.");
 			}
 			// Wait for the last data element to be received in the receiver thread.
-			while sink.load(Ordering::Relaxed) != data {}
+			let last_data = black_box(*size);
+			while sink.load(Ordering::Acquire) != last_data {}
 		}
 		start.elapsed()
 	}));
 	receiver.join().expect("Should not have panicked.");
 }
 
-fn disruptor(group: &mut BenchmarkGroup<WallTime>, inputs: (u64, u64), param: &str) {
+fn disruptor(group: &mut BenchmarkGroup<WallTime>, inputs: (i64, u64), param: &str) {
 	let factory = || { Event { data: 0 } };
 	// Use an AtomicI64 to "extract" the value from the processing thread.
 	let sink      = Arc::new(AtomicI64::new(0));
 	let processor = {
 		let sink = Arc::clone(&sink);
-		move |event: &Event, sequence: i64, end_of_batch: bool| {
-			black_box(sequence);     // To avoid dead code elimination.
-			black_box(end_of_batch); // To avoid dead code elimination.
-			sink.store(event.data, Ordering::Relaxed);
+		move |event: &Event, _sequence: i64, _end_of_batch: bool| {
+			sink.store(event.data, Ordering::Release);
 		}
 	};
 	let mut producer = disruptor::build_single_producer(DATA_STRUCTURE_SIZE, factory, BusySpin)
 		.handle_events_with(processor)
 		.build();
-	let mut data     = black_box(0);
 	let benchmark_id = BenchmarkId::new("disruptor", &param);
 	group.bench_with_input(benchmark_id, &inputs, move |b, (size, pause_ms) | b.iter_custom(|iters| {
 		pause(*pause_ms);
 		let start = Instant::now();
 		for _ in 0..iters {
-			for _ in 0..*size {
-				data += 1;
+			for data in 1..=*size {
 				producer.publish(|e| {
-					e.data = data;
+					e.data = black_box(data);
 				});
 			}
 			// Wait for the last data element to be received inside processor.
-			while sink.load(Ordering::Relaxed) != data {}
+			let last_data = black_box(*size);
+			while sink.load(Ordering::Acquire) != last_data {}
 		}
 		start.elapsed()
 	}));

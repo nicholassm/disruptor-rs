@@ -134,9 +134,9 @@ There's also no use of dynamic dispatch - everything is monomorphed.
 
 # Performance
 
-The SPSC Disruptor variant has been benchmarked and compared to Crossbeam. See the code in the `benches/spsc.rs` file.
+The SPSC and MPSC Disruptor variants have been benchmarked and compared to Crossbeam. See the code in the `benches/spsc.rs` and `benches/mpsc.rs` files.
 
-The results below are gathered from running the benchmarks on a 2016 Macbook Pro running a 2,6 GHz Quad-Core Intel Core i7. So on a modern Intel Xeon the numbers should be even better. Furthermore, it's not possible to isolate cores on Mac and pin threads which would produce even more stable results. This is future work.
+The results below of the SPSC benchmark are gathered from running the benchmarks on a 2016 Macbook Pro running a 2,6 GHz Quad-Core Intel Core i7. So on a modern Intel Xeon the numbers should be even better. Furthermore, it's not possible to isolate cores on Mac and pin threads which would produce even more stable results. This is future work.
 
 If you have any suggestions to improving the benchmarks, please feel free to open an issue.
 

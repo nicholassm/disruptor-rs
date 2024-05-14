@@ -42,13 +42,13 @@ pub fn mpsc_benchmark(c: &mut Criterion) {
 	group.finish();
 }
 
-struct Fixing {
+struct BurstProducer {
 	start_barrier: Arc<CachePadded<AtomicBool>>,
 	stop:          Arc<CachePadded<AtomicBool>>,
 	join_handle:   Option<JoinHandle<()>>,
 }
 
-impl Fixing {
+impl BurstProducer {
 	fn new<P>(mut produce_one_burst: P) -> Self
 	where
 		P: 'static + Send + FnMut()
@@ -88,23 +88,23 @@ impl Fixing {
 }
 
 fn run_benchmark(
-	group:        &mut BenchmarkGroup<WallTime>,
-	benchmark_id: BenchmarkId,
-	burst_size:   Arc<AtomicI64>,
-	sink:         Arc<AtomicI64>,
-	params:       (i64, u64),
-	fixings:      &[Fixing])
+	group:           &mut BenchmarkGroup<WallTime>,
+	benchmark_id:    BenchmarkId,
+	burst_size:      Arc<AtomicI64>,
+	sink:            Arc<AtomicI64>,
+	params:          (i64, u64),
+	burst_producers: &[BurstProducer])
 {
 	group.bench_with_input(benchmark_id, &params, move |b, (size, pause_ms)| b.iter_custom(|iters| {
 		burst_size.store(*size, Release);
-		let count = black_box(*size * fixings.len() as i64);
+		let count = black_box(*size * burst_producers.len() as i64);
 		pause(*pause_ms);
 		let start = Instant::now();
 		for _ in 0..iters {
 			sink.store(0, Release);
-			fixings.iter().for_each(Fixing::start);
+			burst_producers.iter().for_each(BurstProducer::start);
 			// Wait for all producers to finish publication.
-			while sink.load(Acquire) != count {}
+			while sink.load(Acquire) != count {/* Busy spin. */}
 		}
 		let elapsed = start.elapsed();
 		elapsed
@@ -112,24 +112,25 @@ fn run_benchmark(
 }
 
 fn base(group: &mut BenchmarkGroup<WallTime>, size: i64) {
-	let sink         = Arc::new(AtomicI64::new(0));
-	let benchmark_id = BenchmarkId::new("base", size);
-	let burst_size   = Arc::new(AtomicI64::new(0));
-	let mut fixings: Vec<Fixing> = (0..PRODUCERS)
+	let sink                = Arc::new(AtomicI64::new(0));
+	let benchmark_id        = BenchmarkId::new("base", size);
+	let burst_size          = Arc::new(AtomicI64::new(0));
+	let mut burst_producers = (0..PRODUCERS)
 		.into_iter()
 		.map(|_| {
 			let sink       = Arc::clone(&sink);
 			let burst_size = Arc::clone(&burst_size);
-			Fixing::new(move || {
-				for _ in 0..burst_size.load(Acquire) {
+			BurstProducer::new(move || {
+				let burst_size = burst_size.load(Acquire);
+				for _ in 0..burst_size {
 					sink.fetch_add(1, Release);
 				}
 			})
 		})
-		.collect();
+		.collect::<Vec<BurstProducer>>();
 
-	run_benchmark(group, benchmark_id, burst_size, sink, (size, 0), &fixings);
-	fixings.iter_mut().for_each(Fixing::stop);
+	run_benchmark(group, benchmark_id, burst_size, sink, (size, 0), &burst_producers);
+	burst_producers.iter_mut().for_each(BurstProducer::stop);
 }
 
 fn crossbeam(group: &mut BenchmarkGroup<WallTime>, params: (i64, u64), param_description: &str) {
@@ -145,25 +146,26 @@ fn crossbeam(group: &mut BenchmarkGroup<WallTime>, params: (i64, u64), param_des
 			}
 		})
 	};
-	let benchmark_id = BenchmarkId::new("Crossbeam", &param_description);
-	let burst_size   = Arc::new(AtomicI64::new(0));
-	let mut fixings: Vec<Fixing> = (0..PRODUCERS)
+	let benchmark_id        = BenchmarkId::new("Crossbeam", &param_description);
+	let burst_size          = Arc::new(AtomicI64::new(0));
+	let mut burst_producers = (0..PRODUCERS)
 		.into_iter()
 		.map(|_| {
 			let burst_size = Arc::clone(&burst_size);
 			let s          = s.clone();
-			Fixing::new(move || {
-				for data in 1..=burst_size.load(Acquire) {
+			BurstProducer::new(move || {
+				let burst_size = burst_size.load(Acquire);
+				for data in 1..=burst_size {
 					s.send(Event { data: black_box(data) }).expect("Should successfully send.");
 				}
 			})
 		})
-		.collect();
+		.collect::<Vec<BurstProducer>>();
 	drop(s); // Original send channel not used.
 
-	run_benchmark(group, benchmark_id, burst_size, sink, params, &fixings);
+	run_benchmark(group, benchmark_id, burst_size, sink, params, &burst_producers);
 
-	fixings.iter_mut().for_each(Fixing::stop);
+	burst_producers.iter_mut().for_each(BurstProducer::stop);
 	receiver.join().expect("Should not have panicked.");
 }
 
@@ -182,27 +184,28 @@ fn disruptor(group: &mut BenchmarkGroup<WallTime>, params: (i64, u64), param_des
 	let producer = disruptor::build_multi_producer(DATA_STRUCTURE_SIZE, factory, BusySpin)
 		.handle_events_with(processor)
 		.build();
-	let benchmark_id = BenchmarkId::new("disruptor", &param_description);
-	let burst_size   = Arc::new(AtomicI64::new(0));
-	let mut fixings: Vec<Fixing> = (0..PRODUCERS)
+	let benchmark_id        = BenchmarkId::new("disruptor", &param_description);
+	let burst_size          = Arc::new(AtomicI64::new(0));
+	let mut burst_producers = (0..PRODUCERS)
 		.into_iter()
 		.map(|_| {
 			let burst_size   = Arc::clone(&burst_size);
 			let mut producer = producer.clone();
-			Fixing::new(move || {
-				for data in 1..=burst_size.load(Acquire) {
+			BurstProducer::new(move || {
+				let burst_size = burst_size.load(Acquire);
+				for data in 1..=burst_size {
 					producer.publish(|e| {
 						e.data = black_box(data);
 					});
 				}
 			})
 		})
-		.collect();
+		.collect::<Vec<BurstProducer>>();
 	drop(producer); // Original producer not used.
 
-	run_benchmark(group, benchmark_id, burst_size, sink, params, &fixings);
+	run_benchmark(group, benchmark_id, burst_size, sink, params, &burst_producers);
 
-	fixings.iter_mut().for_each(Fixing::stop);
+	burst_producers.iter_mut().for_each(BurstProducer::stop);
 }
 
 criterion_group!(mpsc, mpsc_benchmark);

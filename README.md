@@ -150,21 +150,17 @@ The latencies below are the mean latency per element with 95% confidence interva
 
 |  Burst Size | Crossbeam | Disruptor | Improvement |
 |------------:|----------:|----------:|------------:|
-|           1 |    228 ns |    161 ns |         29% |
-|           5 |     96 ns |     43 ns |         55% |
-|          10 |     76 ns |     34 ns |         55% |
-|          50 |     41 ns |     32 ns |         22% |
-|         100 |     37 ns |     32 ns |         14% |
+|           1 |     53 ns |     35 ns |         34% |
+|          10 |     71 ns |     29 ns |         59% |
+|         100 |     34 ns |     31 ns |          9% |
 
 *Throughput:*
 
 |  Burst Size |  Crossbeam |   Disruptor | Improvement |
 |------------:|-----------:|------------:|------------:|
-|           1 |   4.4M / s |    6.2M / s |         41% |
-|           5 |  10.4M / s |   23.2M / s |        123% |
-|          10 |  13.2M / s |   29.4M / s |        123% |
-|          50 |  24.3M / s |   31.7M / s |         30% |
-|         100 |  27.3M / s |   31.6M / s |         16% |
+|           1 |  19.0M / s |   28.7M / s |         51% |
+|          10 |  14.2M / s |   34.8M / s |        145% |
+|         100 |  29.7M / s |   31.9M / s |          7% |
 
 ## 1 ms Pause Between Bursts
 
@@ -172,21 +168,17 @@ The latencies below are the mean latency per element with 95% confidence interva
 
 |  Burst Size | Crossbeam |  Disruptor | Improvement |
 |------------:|----------:|-----------:|------------:|
-|           1 |    235 ns |     160 ns |         32% |
-|           5 |    100 ns |      43 ns |         57% |
-|          10 |     75 ns |      34 ns |         55% |
-|          50 |     41 ns |      33 ns |         20% |
-|         100 |     37 ns |      32 ns |         14% |
+|           1 |     52 ns |      35 ns |         32% |
+|          10 |     71 ns |      31 ns |         56% |
+|         100 |     33 ns |      29 ns |         12% |
 
 *Throughput:*
 
 |  Burst Size |  Crossbeam | Disruptor | Improvement |
 |------------:|-----------:|----------:|------------:|
-|           1 |   4.2M / s |  6.2M / s |         48% |
-|           5 |   9.9M / s | 22.9M / s |        131% |
-|          10 |  13.2M / s | 29.0M / s |        120% |
-|          50 |  24.2M / s | 30.5M / s |         26% |
-|         100 |  27.4M / s | 31.3M / s |         14% |
+|           1 |  19.0M / s | 28.5M / s |         50% |
+|          10 |  14.1M / s | 32.6M / s |        131% |
+|         100 |  30.6M / s | 34.4M / s |         12% |
 
 ## 10 ms Pause Between Bursts
 
@@ -194,21 +186,17 @@ The latencies below are the mean latency per element with 95% confidence interva
 
 |  Burst Size | Crossbeam | Disruptor | Improvement |
 |------------:|----------:|----------:|------------:|
-|           1 |    257 ns |    160 ns |         38% |
-|           5 |    109 ns |     44 ns |         60% |
-|          10 |     80 ns |     35 ns |         56% |
-|          50 |     44 ns |     30 ns |         32% |
-|         100 |     38 ns |     34 ns |         11% |
+|           1 |     56 ns |     35 ns |         38% |
+|          10 |     75 ns |     29 ns |         61% |
+|         100 |     35 ns |     31 ns |         11% |
 
 *Throughput:*
 
 |  Burst Size | Crossbeam | Disruptor | Improvement |
 |------------:|----------:|----------:|------------:|
-|           1 |  3.9M / s |  6.2M / s |         59% |
-|           5 |  9.1M / s | 22.5M / s |        147% |
-|          10 | 12.5M / s | 28.7M / s |        130% |
-|          50 | 22.6M / s | 32.8M / s |         45% |
-|         100 | 26.3M / s | 29.7M / s |         13% |
+|           1 | 18.0M / s | 28.8M / s |         60% |
+|          10 | 13.3M / s | 35.0M / s |        163% |
+|         100 | 28.7M / s | 32.4M / s |         13% |
 
 ## Conclusion
 

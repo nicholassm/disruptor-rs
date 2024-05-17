@@ -204,7 +204,6 @@ There's clearly a difference between the Disruptor and the Crossbeam libs. Howev
 
 Both libraries greatly improves as the burst size goes up but the Disruptor's performance is more resilient to the pauses between bursts which is one of the design goals.
 
-
 # Related Work
 
 There are multiple other Rust projects that mimic the LMAX Disruptor library:

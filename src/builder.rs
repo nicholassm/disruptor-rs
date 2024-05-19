@@ -100,6 +100,9 @@ where
 /// # Examples
 ///
 /// ```
+///# #[cfg(miri)] fn main() {}
+///# #[cfg(not(miri))]
+///# fn main() {
 ///# use disruptor::*;
 ///#
 /// // The example data entity on the ring buffer.
@@ -118,6 +121,7 @@ where
 ///    // Processor 3 is pined and gets a generic name.
 ///    .pined_at_core(2).handle_events_with(processor3)
 ///    .build();
+///# }
 /// ```
 pub trait ProcessorSettings<E, W>: Sized {
 	#[doc(hidden)]

@@ -206,7 +206,7 @@ mod tests {
 		assert_eq!(result, expected);
 	}
 
-	#[test]
+	#[test] #[cfg_attr(miri, ignore)]
 	fn spmc_with_concurrent_consumers() {
 		let (s, r) = mpsc::channel();
 

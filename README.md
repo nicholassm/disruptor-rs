@@ -220,6 +220,5 @@ Changes are accepted solely at my discretion and I will focus on whether the cha
 
 # Roadmap
 
-1. Verify correctness with Miri.
-2. Add a Sleeping Wait Strategy.
-3. Support for batch publication.
+1. Add a Sleeping Wait Strategy.
+2. Support for batch publication.

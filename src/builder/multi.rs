@@ -36,19 +36,34 @@ impl<E, W, B> ProcessorSettings<E, W> for MPMCBuilder<E, W, B> {
 	}
 }
 
-impl<E: 'static, W: 'static + WaitStrategy, B: 'static + Barrier> Builder<E, W, B> for MPBuilder<E, W, B> {
+impl<E, W, B> Builder<E, W, B> for MPBuilder<E, W, B>
+where
+	E: 'static + Send + Sync,
+	W: 'static + WaitStrategy,
+	B: 'static + Barrier,
+{
 	fn dependent_barrier(&self) -> Arc<B> {
 		Arc::clone(&self.dependent_barrier)
 	}
 }
 
-impl<E: 'static, W: 'static + WaitStrategy, B: 'static + Barrier> Builder<E, W, B> for MPSCBuilder<E, W, B> {
+impl<E, W, B> Builder<E, W, B> for MPSCBuilder<E, W, B>
+where
+	E: 'static + Send + Sync,
+	W: 'static + WaitStrategy,
+	B: 'static + Barrier,
+{
 	fn dependent_barrier(&self) -> Arc<B> {
 		self.parent.dependent_barrier()
 	}
 }
 
-impl<E: 'static, W: 'static + WaitStrategy, B: 'static + Barrier> Builder<E, W, B> for MPMCBuilder<E, W, B> {
+impl<E, W, B> Builder<E, W, B> for MPMCBuilder<E, W, B>
+where
+	E: 'static + Send + Sync,
+	W: 'static + WaitStrategy,
+	B: 'static + Barrier,
+{
 	fn dependent_barrier(&self) -> Arc<B> {
 		self.parent.dependent_barrier()
 	}
@@ -56,7 +71,7 @@ impl<E: 'static, W: 'static + WaitStrategy, B: 'static + Barrier> Builder<E, W, 
 
 impl <E, W, B> MPBuilder<E, W, B>
 where
-	E: 'static,
+	E: 'static + Send + Sync,
 	W: 'static + WaitStrategy,
 	B: 'static + Barrier,
 {
@@ -84,8 +99,8 @@ where
 
 impl <E, W, B> MPSCBuilder<E, W, B>
 where
+	E: 'static + Send + Sync,
 	W: 'static + WaitStrategy,
-	E: 'static,
 	B: 'static + Barrier,
 {
 
@@ -128,7 +143,7 @@ where
 
 impl <E, W, B> MPMCBuilder<E, W, B>
 where
-	E: 'static,
+	E: 'static + Send + Sync,
 	W: 'static + WaitStrategy,
 	B: 'static + Barrier,
 {

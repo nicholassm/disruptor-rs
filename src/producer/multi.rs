@@ -14,7 +14,7 @@ struct SharedProducer {
 /// [`Producer`] for how to use a Producer.
 pub struct MultiProducer<E, C> {
 	shutdown_at_sequence:        Arc<CachePadded<AtomicI64>>,
-	ring_buffer:                 *mut RingBuffer<E>,
+	ring_buffer:                 Arc<RingBuffer<E>>,
 	shared_producer:             Arc<Mutex<SharedProducer>>,
 	producer_barrier:            Arc<MultiProducerBarrier>,
 	consumer_barrier:            Arc<C>,
@@ -48,8 +48,6 @@ where
 	}
 }
 
-unsafe impl<E: Send, C> Send for MultiProducer<E, C> {}
-
 impl<E, C> Clone for MultiProducer<E, C> {
 	fn clone(&self) -> Self {
 		let shared = self.shared_producer.lock().unwrap();
@@ -66,10 +64,11 @@ impl<E, C> Clone for MultiProducer<E, C> {
 		let producer_barrier     = Arc::clone(&self.producer_barrier);
 		let shared_producer      = Arc::clone(&self.shared_producer);
 		let consumer_barrier     = Arc::clone(&self.consumer_barrier);
+		let ring_buffer          = Arc::clone(&self.ring_buffer);
 
 		MultiProducer {
 			shutdown_at_sequence,
-			ring_buffer: self.ring_buffer,
+			ring_buffer,
 			shared_producer,
 			producer_barrier,
 			consumer_barrier,
@@ -88,11 +87,6 @@ impl<E, C> Drop for MultiProducer<E, C> {
 			let sequence = self.producer_barrier.next();
 			self.shutdown_at_sequence.store(sequence, Ordering::Relaxed);
 			shared.consumers.iter_mut().for_each(|c| { c.join(); });
-
-			// SAFETY: Both producers and consumers are done accessing the RingBuffer.
-			unsafe {
-				drop(Box::from_raw(self.ring_buffer));
-			}
 		}
 	}
 }
@@ -103,7 +97,7 @@ where
 {
 	pub(crate) fn new(
 		shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
-		ring_buffer:          *mut RingBuffer<E>,
+		ring_buffer:          Arc<RingBuffer<E>>,
 		producer_barrier:     Arc<MultiProducerBarrier>,
 		consumers:            Vec<Consumer>,
 		consumer_barrier:     C,
@@ -119,7 +113,7 @@ where
 		);
 		let consumer_barrier = Arc::new(consumer_barrier);
 		// Known to be available initially as consumers start at index 0.
-		let sequence_clear_of_consumers = unsafe { (*ring_buffer).size() - 1 };
+		let sequence_clear_of_consumers = ring_buffer.size() - 1;
 		MultiProducer {
 			shutdown_at_sequence,
 			ring_buffer,
@@ -144,11 +138,10 @@ where
 
 		let sequence = self.claimed_sequence;
 		if self.sequence_clear_of_consumers < sequence {
-			let ring_buffer = self.ring_buffer();
 			// We have to check where the consumer is in case we're about to
 			// publish into the slot currently being read by the consumer.
 			// (Consumer is an entire ring buffer behind the producer).
-			let wrap_point                 = ring_buffer.wrap_point(sequence);
+			let wrap_point                 = self.ring_buffer.wrap_point(sequence);
 			let lowest_sequence_being_read = self.consumer_barrier.get_after(sequence) + 1;
 			// `<=` because a producer can claim a sequence number that a consumer is still using
 			// before the wrap_point. (Compare with the single-threaded Producer that cannot claim
@@ -160,7 +153,7 @@ where
 
 			// We can now continue until we get right behind the consumer's current
 			// position without checking where it actually is.
-			self.sequence_clear_of_consumers = lowest_sequence_being_read + ring_buffer.size() - 1;
+			self.sequence_clear_of_consumers = lowest_sequence_being_read + self.ring_buffer.size() - 1;
 		}
 
 		Ok(sequence)
@@ -173,23 +166,17 @@ where
 		F: FnOnce(&mut E)
 	{
 		let sequence  = self.claimed_sequence;
-		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
+		// SAFETY: Now, we have exclusive access to the event at `sequence` and a producer
 		// can now update the data.
-		let ring_buffer = self.ring_buffer();
+		let event_ptr = self.ring_buffer.get(sequence);
 		unsafe {
-			let element = &mut *ring_buffer.get(sequence);
-			update(element);
+			update(&mut *event_ptr);
 		}
 		// Make publication available by publishing `sequence`.
 		self.producer_barrier.publish(sequence);
 		// sequence is now used - replace it with None.
 		self.claimed_sequence = NONE;
 		Ok(sequence)
-	}
-
-	#[inline]
-	fn ring_buffer(&self) -> &RingBuffer<E> {
-		unsafe { &*self.ring_buffer }
 	}
 }
 

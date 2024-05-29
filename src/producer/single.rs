@@ -10,7 +10,7 @@ use super::*;
 /// [`Producer`] for how to use a Producer.
 pub struct SingleProducer<E, C> {
 	shutdown_at_sequence:        Arc<CachePadded<AtomicI64>>,
-	ring_buffer:                 *mut RingBuffer<E>,
+	ring_buffer:                 Arc<RingBuffer<E>>,
 	producer_barrier:            Arc<SingleProducerBarrier>,
 	consumers:                   Vec<Consumer>,
 	consumer_barrier:            C,
@@ -20,8 +20,6 @@ pub struct SingleProducer<E, C> {
 	/// to not interfere.
 	sequence_clear_of_consumers: Sequence,
 }
-
-unsafe impl<E: Send, C> Send for SingleProducer<E, C> {}
 
 impl<E, C> Producer<E> for SingleProducer<E, C>
 where
@@ -52,13 +50,13 @@ where
 {
 	pub(crate) fn new(
 		shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
-		ring_buffer:          *mut RingBuffer<E>,
+		ring_buffer:          Arc<RingBuffer<E>>,
 		producer_barrier:     Arc<SingleProducerBarrier>,
 		consumers:            Vec<Consumer>,
 		consumer_barrier:     C,
 	) -> Self
 	{
-		let sequence_clear_of_consumers = unsafe { (*ring_buffer).size() - 1};
+		let sequence_clear_of_consumers = ring_buffer.size() - 1;
 		Self {
 			shutdown_at_sequence,
 			ring_buffer,
@@ -78,8 +76,7 @@ where
 			// We have to check where the consumers are in case we're about to overwrite a slot
 			// which is still being read.
 			// (The slowest consumer is an entire ring buffer behind the producer).
-			let ring_buffer                = self.ring_buffer();
-			let wrap_point                 = ring_buffer.wrap_point(sequence);
+			let wrap_point                 = self.ring_buffer.wrap_point(sequence);
 			let lowest_sequence_being_read = self.consumer_barrier.get_after(sequence) + 1;
 			if lowest_sequence_being_read == wrap_point {
 				return Err(RingBufferFull);
@@ -88,7 +85,7 @@ where
 
 			// We can now continue until we get right behind the slowest consumer's current
 			// position without checking where it actually is.
-			self.sequence_clear_of_consumers = lowest_sequence_being_read + ring_buffer.size() - 1;
+			self.sequence_clear_of_consumers = lowest_sequence_being_read + self.ring_buffer.size() - 1;
 		}
 
 		Ok(sequence)
@@ -100,24 +97,18 @@ where
 	where
 		F: FnOnce(&mut E)
 	{
-		// SAFETY: Now, we have exclusive access to the element at `sequence` and a producer
+		let sequence  = self.sequence;
+		// SAFETY: Now, we have exclusive access to the event at `sequence` and a producer
 		// can now update the data.
-		let sequence    = self.sequence;
-		let ring_buffer = self.ring_buffer();
+		let event_ptr = self.ring_buffer.get(sequence);
 		unsafe {
-			let element = &mut *ring_buffer.get(sequence);
-			update(element);
+			update(&mut *event_ptr);
 		}
 		// Publish by publishing `sequence`.
 		self.producer_barrier.publish(sequence);
 		// Update sequence that will be published the next time.
 		self.sequence += 1;
 		Ok(sequence)
-	}
-
-	#[inline]
-	fn ring_buffer(&self) -> &RingBuffer<E> {
-		unsafe { &*self.ring_buffer }
 	}
 }
 
@@ -126,11 +117,6 @@ impl<E, C> Drop for SingleProducer<E, C> {
 	fn drop(&mut self) {
 		self.shutdown_at_sequence.store(self.sequence, Ordering::Relaxed);
 		self.consumers.iter_mut().for_each(|c| { c.join(); });
-
-		// SAFETY: Both publishers and receivers are done accessing the RingBuffer.
-		unsafe {
-			drop(Box::from_raw(self.ring_buffer));
-		}
 	}
 }
 

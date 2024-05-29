@@ -46,7 +46,7 @@ pub fn build_single_producer<E, W, F>(size: usize, event_factory: F, wait_strate
 -> SPBuilder<E, W, SingleProducerBarrier>
 where
 	F: FnMut() -> E,
-	E: 'static,
+	E: 'static + Send + Sync,
 	W: 'static + WaitStrategy,
 {
 	let producer_barrier  = Arc::new(SingleProducerBarrier::new());
@@ -87,7 +87,7 @@ pub fn build_multi_producer<E, W, F>(size: usize, event_factory: F, wait_strateg
 -> MPBuilder<E, W, MultiProducerBarrier>
 where
 	F: FnMut() -> E,
-	E: 'static,
+	E: 'static + Send + Sync,
 	W: 'static + WaitStrategy,
 {
 	let producer_barrier  = Arc::new(MultiProducerBarrier::new(size));
@@ -143,9 +143,9 @@ pub trait ProcessorSettings<E, W>: Sized {
 
 trait Builder<E, W, B>: ProcessorSettings<E, W>
 where
+	E: 'static + Send + Sync,
 	B: 'static + Barrier,
 	W: 'static + WaitStrategy,
-	E: 'static
 {
 	fn add_event_handler<EH>(&mut self, event_handler: EH)
 	where
@@ -162,7 +162,7 @@ where
 #[doc(hidden)]
 pub struct Shared<E, W> {
 	pub(crate) shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
-	pub(crate) ring_buffer:          *mut RingBuffer<E>,
+	pub(crate) ring_buffer:          Arc<RingBuffer<E>>,
 	pub(crate) consumers:            Vec<Consumer>,
 	current_consumer_cursors:        Option<Vec<Arc<Cursor>>>,
 	wait_strategy:                   W,
@@ -174,7 +174,7 @@ impl <E, W> Shared<E, W> {
 	where
 		F: FnMut() -> E
 	{
-		let ring_buffer              = Box::into_raw(Box::new(RingBuffer::new(size, event_factory)));
+		let ring_buffer              = Arc::new(RingBuffer::new(size, event_factory));
 		let shutdown_at_sequence     = Arc::new(CachePadded::new(AtomicI64::new(NONE)));
 		let current_consumer_cursors = Some(vec![]);
 
@@ -223,29 +223,20 @@ impl ThreadContext {
 	}
 }
 
-struct RingBufferWrapper<E>(*mut RingBuffer<E>);
-unsafe impl<E> Send for RingBufferWrapper<E> {}
-
-impl<E> RingBufferWrapper<E> {
-	fn unwrap(&self) -> &RingBuffer<E> {
-		unsafe { &*self.0 }
-	}
-}
-
 fn start_processor<E, EP, W, B> (
 	mut event_handler: EP,
 	builder:           &mut Shared<E, W>,
 	barrier:           Arc<B>)
 -> (Arc<Cursor>, Consumer)
 where
-	E:  'static,
+	E:  'static + Send + Sync,
 	EP: 'static + Send + FnMut(&E, Sequence, bool),
 	W:  'static + WaitStrategy,
 	B:  'static + Barrier + Send + Sync,
 {
 	let consumer_cursor      = Arc::new(Cursor::new(-1));// Initially, the consumer has not read slot 0 yet.
 	let wait_strategy        = builder.wait_strategy;
-	let wrapper              = RingBufferWrapper(builder.ring_buffer);
+	let ring_buffer          = Arc::clone(&builder.ring_buffer);
 	let shutdown_at_sequence = Arc::clone(&builder.shutdown_at_sequence);
 	let thread_name          = builder.thread_context.name();
 	let affinity             = builder.thread_context.affinity();
@@ -254,7 +245,6 @@ where
 		let consumer_cursor = Arc::clone(&consumer_cursor);
 		thread_builder.spawn(move || {
 			set_affinity_if_defined(affinity, thread_name.as_str());
-			let ring_buffer  = wrapper.unwrap();
 			let mut sequence = 0;
 			loop {
 				let mut available = barrier.get_after(sequence);
@@ -270,13 +260,12 @@ where
 
 				while available >= sequence {
 					let end_of_batch = available == sequence;
-					// SAFETY: Now, we have (shared) read access to the element at `sequence`.
-					let mut_element  = ring_buffer.get(sequence);
+					// SAFETY: Now, we have (shared) read access to the event at `sequence`.
+					let event_ptr    = ring_buffer.get(sequence);
 					unsafe {
-						let element: &E = &*mut_element;
-						event_handler(element, sequence, end_of_batch);
+						event_handler(& *event_ptr, sequence, end_of_batch);
 					}
-					// Signal to producers that we're done processing `sequence`.
+					// Signal to producers or later consumers that we're done processing `sequence`.
 					consumer_cursor.store(sequence);
 					// Update next sequence to read.
 					sequence += 1;

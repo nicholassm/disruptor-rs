@@ -29,3 +29,19 @@ impl Cursor {
 		self.counter.load(Ordering::Relaxed)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn cursor_operations() {
+		let cursor = Cursor::new(-1);
+
+		assert_eq!(cursor.next(), 0);
+		assert_eq!(cursor.next(), 1);
+
+		cursor.store(100);
+		assert_eq!(cursor.relaxed_value(), 100);
+	}
+}

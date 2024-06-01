@@ -95,6 +95,16 @@ where
 		self.add_event_handler(event_handler);
 		SPSCBuilder { parent: self }
 	}
+
+	/// Add an event handler with state.
+	pub fn handle_events_and_state_with<EH, S, IS>(mut self, event_handler: EH, initialize_state: IS) -> SPSCBuilder<E, W, B>
+	where
+		EH: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
+		IS: 'static + Send + FnOnce() -> S,
+	{
+		self.add_event_handler_with_state(event_handler, initialize_state);
+		SPSCBuilder { parent: self }
+	}
 }
 
 impl <E, W, B> SPSCBuilder<E, W, B>
@@ -138,6 +148,16 @@ where
 		self.add_event_handler(event_handler);
 		SPMCBuilder { parent: self.parent }
 	}
+
+	/// Add an event handler with state.
+	pub fn handle_events_and_state_with<EH, S, IS>(mut self, event_handler: EH, initalize_state: IS) -> SPMCBuilder<E, W, B>
+	where
+		EH: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
+		IS: 'static + Send + FnOnce() -> S,
+	{
+		self.add_event_handler_with_state(event_handler, initalize_state);
+		SPMCBuilder { parent: self.parent }
+	}
 }
 
 impl <E, W, B> SPMCBuilder<E, W, B>
@@ -152,6 +172,16 @@ where
 		EH: 'static + Send + FnMut(&E, Sequence, bool)
 	{
 		self.add_event_handler(event_handler);
+		self
+	}
+
+	/// Add an event handler with state.
+	pub fn handle_events_and_state_with<EH, S, IS>(mut self, event_handler: EH, initialize_state: IS) -> SPMCBuilder<E, W, B>
+	where
+		EH: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
+		IS: 'static + Send + FnOnce() -> S,
+	{
+		self.add_event_handler_with_state(event_handler, initialize_state);
 		self
 	}
 

@@ -13,7 +13,7 @@ It's heavily inspired by the brilliant
 
 Add the following to your `Cargo.toml` file:
 
-    disruptor = "2.0.0"
+    disruptor = "2.1.0"
 
 To read details of how to use the library, check out the documentation on [docs.rs/disruptor](https://docs.rs/disruptor).
 
@@ -109,6 +109,44 @@ fn main() {
 }// At this point, the Producers instances go out of scope and when the
  // processors are done handling all events then the Disruptor is dropped
  // as well.
+```
+
+If you need to store some state in the processor thread which is neither `Send` nor `Sync`, e.g. a `Rc<RefCell<i32>>`, then you can create a closure for initializing that state and pass it along with the processing closure when you build the Disruptor. The Disruptor will then pass a mutable reference to your state on each event. As an example:
+
+```rust
+use std::{cell::RefCell, rc::Rc};
+use disruptor::*;
+
+struct Event {
+    price: f64
+}
+
+#[derive(Default)]
+struct State {
+    data: Rc<RefCell<i32>>
+}
+
+fn main() {
+    let factory = || { Event { price: 0.0 }};
+    let initial_state = || { State::default() };
+
+    // Closure for processing events *with* state.
+    let processor = |s: &mut State, e: &Event, _: Sequence, _: bool| {
+        // Mutate your custom state:
+        *s.data.borrow_mut() += 1;
+    };
+
+    let size = 64;
+    let mut producer = disruptor::build_single_producer(size, factory, BusySpin)
+        .handle_events_and_state_with(processor, initial_state)
+        .build();
+
+    for i in 0..10 {
+        producer.publish(|e| {
+            e.price = i as f64;
+        });
+    }
+}
 ```
 
 # Features

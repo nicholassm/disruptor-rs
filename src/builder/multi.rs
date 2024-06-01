@@ -95,6 +95,16 @@ where
 		self.add_event_handler(event_handler);
 		MPSCBuilder { parent: self }
 	}
+
+	/// Add an event handler with state.
+	pub fn handle_events_and_state_with<EH, S, IS>(mut self, event_handler: EH, initialize_state: IS) -> MPSCBuilder<E, W, B>
+	where
+		EH: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
+		IS: 'static + Send + FnOnce() -> S
+	{
+		self.add_event_handler_with_state(event_handler, initialize_state);
+		MPSCBuilder { parent: self }
+	}
 }
 
 impl <E, W, B> MPSCBuilder<E, W, B>
@@ -103,13 +113,22 @@ where
 	W: 'static + WaitStrategy,
 	B: 'static + Barrier,
 {
-
 	/// Add an event handler.
 	pub fn handle_events_with<EH>(mut self, event_handler: EH) -> MPMCBuilder<E, W, B>
 	where
 		EH: 'static + Send + FnMut(&E, Sequence, bool)
 	{
 		self.add_event_handler(event_handler);
+		MPMCBuilder { parent: self.parent }
+	}
+
+	/// Add an event handler with state.
+	pub fn handle_events_and_state_with<EH, S, IS>(mut self, event_handler: EH, initialize_state: IS) -> MPMCBuilder<E, W, B>
+	where
+		EH: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
+		IS: 'static + Send + FnOnce() -> S
+	{
+		self.add_event_handler_with_state(event_handler, initialize_state);
 		MPMCBuilder { parent: self.parent }
 	}
 
@@ -153,6 +172,16 @@ where
 		EH: 'static + Send + FnMut(&E, Sequence, bool)
 	{
 		self.add_event_handler(event_handler);
+		self
+	}
+
+	/// Add an event handler with state.
+	pub fn handle_events_and_state_with<EH, S, IS>(mut self, event_handler: EH, initialize_state: IS) -> MPMCBuilder<E, W, B>
+	where
+		EH: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
+		IS: 'static + Send + FnOnce() -> S
+	{
+		self.add_event_handler_with_state(event_handler, initialize_state);
 		self
 	}
 

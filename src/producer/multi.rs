@@ -169,9 +169,8 @@ where
 		// SAFETY: Now, we have exclusive access to the event at `sequence` and a producer
 		// can now update the data.
 		let event_ptr = self.ring_buffer.get(sequence);
-		unsafe {
-			update(&mut *event_ptr);
-		}
+		let event     = unsafe { &mut *event_ptr };
+		update(event);
 		// Make publication available by publishing `sequence`.
 		self.producer_barrier.publish(sequence);
 		// sequence is now used - replace it with None.

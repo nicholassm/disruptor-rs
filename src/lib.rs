@@ -36,6 +36,9 @@
 //! will be dropped including consumers.
 //!
 //! # Examples
+//!
+//! ### Basic Usage:
+//!
 //! ```
 //! use disruptor::*;
 //!
@@ -75,6 +78,108 @@
 //! // The Producer instance goes out of scope and the Disruptor, the processor (consumer) and
 //! // the Producer are dropped.
 //! ```
+//!
+//! ###  Multiple Producers and Multiple, Pined Consumers:
+//! ```
+//! use disruptor::*;
+//! use std::thread;
+//!
+//! // The event on the ring buffer.
+//! struct Event {
+//!     price: f64
+//! }
+//!
+//! # #[cfg(miri)] fn main() {}
+//! # #[cfg(not(miri))]
+//! fn main() {
+//!     // Factory closure for initializing events in the Ring Buffer.
+//!     let factory = || { Event { price: 0.0 }};
+//!
+//!     // Closure for processing events.
+//!     let h1 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+//!         // Processing logic here.
+//!     };
+//!     let h2 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+//!         // Some processing logic here.
+//!     };
+//!     let h3 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+//!         // More processing logic here.
+//!     };
+//!
+//!     let mut producer1 = disruptor::build_multi_producer(64, factory, BusySpin)
+//!         // `h2` handles events concurrently with `h1`.
+//!         .pined_at_core(1).handle_events_with(h1)
+//!         .pined_at_core(2).handle_events_with(h2)
+//!             .and_then()
+//!             // `h3` handles events after `h1` and `h2`.
+//!             .pined_at_core(3).handle_events_with(h3)
+//!         .build();
+//!
+//!     // Create another producer.
+//!     let mut producer2 = producer1.clone();
+//!
+//!     // Publish into the Disruptor.
+//!     thread::scope(|s| {
+//!         s.spawn(move || {
+//!             for i in 0..10 {
+//!                 producer1.publish(|e| {
+//!                     e.price = i as f64;
+//!                 });
+//!             }
+//!         });
+//!         s.spawn(move || {
+//!             for i in 10..20 {
+//!                 producer2.publish(|e| {
+//!                     e.price = i as f64;
+//!                 });
+//!             }
+//!         });
+//!     });
+//! }// At this point, the Producers instances go out of scope and when the
+//!  // processors are done handling all events then the Disruptor is dropped
+//!  // as well.
+//! ```
+//!
+//! ### Adding Custom State That is Neither `Send` Nor `Sync`:
+//!
+//! ```
+//! use std::{cell::RefCell, rc::Rc};
+//! use disruptor::*;
+//!
+//! // The event on the ring buffer.
+//! struct Event {
+//!     price: f64
+//! }
+//!
+//! // Your custom state.
+//! #[derive(Default)]
+//! struct State {
+//!     data: Rc<RefCell<i32>>
+//! }
+//!
+//! fn main() {
+//!     let factory = || { Event { price: 0.0 }};
+//!     let initial_state = || { State::default() };
+//!
+//!     // Closure for processing events *with* state.
+//!     let processor = |s: &mut State, e: &Event, _: Sequence, _: bool| {
+//!         // Mutate your custom state:
+//!         *s.data.borrow_mut() += 1;
+//!     };
+//!
+//!     let size = 64;
+//!     let mut producer = disruptor::build_single_producer(size, factory, BusySpin)
+//!         .handle_events_and_state_with(processor, initial_state)
+//!         .build();
+//!
+//!     // Publish into the Disruptor via the `Producer` handle.
+//!     for i in 0..10 {
+//!         producer.publish(|e| {
+//!             e.price = i as f64;
+//!         });
+//!     }
+//! }
+//! ```
 
 #![deny(rustdoc::broken_intra_doc_links)]
 #![warn(missing_docs)]
@@ -99,6 +204,8 @@ pub use crate::consumer::{SingleConsumerBarrier, MultiConsumerBarrier};
 
 #[cfg(test)]
 mod tests {
+	use std::rc::Rc;
+	use std::cell::RefCell;
 	use std::collections::HashSet;
 	use std::sync::mpsc;
 	use std::thread;
@@ -136,6 +243,32 @@ mod tests {
 
 		let result: Vec<_> = r.iter().collect();
 		assert_eq!(result, [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]);
+	}
+
+	#[test]
+	fn spsc_disruptor_with_state() {
+		let factory          = || { Event { num: -1 }};
+		let (s, r)           = mpsc::channel();
+		let initialize_state = || { Rc::new(RefCell::new(0)) };
+		let processor        = move |state: &mut Rc<RefCell<i64>>, e: &Event, _, _| {
+			let mut ref_cell = state.borrow_mut();
+			*ref_cell       += e.num;
+			s.send(*ref_cell).expect("Should be able to send.");
+		};
+
+		let mut producer = build_single_producer(8, factory, BusySpin)
+			.handle_events_and_state_with(processor, initialize_state)
+			.build();
+		thread::scope(|s| {
+			s.spawn(move || {
+				for i in 0..10 {
+					producer.publish(|e| e.num = i );
+				}
+			});
+		});
+
+		let result: Vec<_> = r.iter().collect();
+		assert_eq!(result, [0, 1, 3, 6, 10, 15, 21, 28, 36, 45]);
 	}
 
 	#[test]
@@ -231,7 +364,6 @@ mod tests {
 			.build();
 
 		producer.publish(|e| { e.num = 0; });
-
 		drop(producer);
 
 		let result: HashSet<i64> = r.iter().collect();
@@ -257,6 +389,7 @@ mod tests {
 
 		let factory      = || { Event { num: -1 }};
 		let builder      = build_single_producer(8, factory, BusySpin);
+
 		let mut producer = builder
 			.handle_events_with(processor1)
 			.and_then()
@@ -266,7 +399,6 @@ mod tests {
 			.build();
 
 		producer.publish(|e| { e.num = 0; });
-
 		drop(producer);
 
 		let result: Vec<i64> = r.iter().collect();

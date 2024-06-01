@@ -57,14 +57,13 @@ A more advanced usage demonstrating this and with multiple producers and multipl
 
 ```rust
 use disruptor::*;
+use std::thread;
 
-// The event on the ring buffer.
 struct Event {
     price: f64
 }
 
 fn main() {
-    // Factory closure for initializing events in the Ring Buffer.
     let factory = || { Event { price: 0.0 }};
 
     // Closure for processing events.
@@ -80,11 +79,11 @@ fn main() {
 
     let mut producer1 = disruptor::build_multi_producer(64, factory, BusySpin)
         // `h2` handles events concurrently with `h1`.
-        .pin_at_core(1).handle_events_with(h1)
-        .pin_at_core(2).handle_events_with(h2)
+        .pined_at_core(1).handle_events_with(h1)
+        .pined_at_core(2).handle_events_with(h2)
             .and_then()
             // `h3` handles events after `h1` and `h2`.
-            .pin_at_core(3).handle_events_with(h3)
+            .pined_at_core(3).handle_events_with(h3)
         .build();
 
     // Create another producer.
@@ -98,14 +97,14 @@ fn main() {
                     e.price = i as f64;
                 });
             }
-        };
+        });
         s.spawn(move || {
             for i in 10..20 {
                 producer2.publish(|e| {
                     e.price = i as f64;
                 });
             }
-        };
+        });
     });
 }// At this point, the Producers instances go out of scope and when the
  // processors are done handling all events then the Disruptor is dropped

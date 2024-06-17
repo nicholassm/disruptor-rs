@@ -15,6 +15,11 @@ impl Cursor {
 	}
 
 	#[inline]
+	pub(crate) fn compare_exchange(&self, current: Sequence, next: Sequence) -> Result<i64, i64> {
+		self.counter.compare_exchange(current, next, Ordering::AcqRel, Ordering::Relaxed)
+	}
+
+	#[inline]
 	pub(crate) fn next(&self) -> Sequence {
 		self.counter.fetch_add(1, Ordering::AcqRel) + 1
 	}

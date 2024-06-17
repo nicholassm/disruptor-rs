@@ -197,7 +197,7 @@ mod producer;
 mod builder;
 
 pub use crate::builder::{build_single_producer, build_multi_producer, ProcessorSettings};
-pub use crate::producer::{Producer, RingBufferFull};
+pub use crate::producer::{Producer, RingBufferFull, MissingFreeSlots};
 pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
 pub use crate::producer::{single::SingleProducer, multi::MultiProducer};
 pub use crate::consumer::{SingleConsumerBarrier, MultiConsumerBarrier};
@@ -207,13 +207,22 @@ mod tests {
 	use std::rc::Rc;
 	use std::cell::RefCell;
 	use std::collections::HashSet;
-	use std::sync::mpsc;
+	use std::sync::atomic::AtomicBool;
+	use std::sync::atomic::Ordering::Relaxed;
+	use std::sync::{mpsc, Arc};
 	use std::thread;
+
+	use producer::MissingFreeSlots;
+
 	use super::*;
 
 	#[derive(Debug)]
 	struct Event {
 		num: i64,
+	}
+
+	fn factory() -> impl Fn() -> Event {
+		|| { Event { num: -1 }}
 	}
 
 	#[test]
@@ -223,16 +232,74 @@ mod tests {
 	}
 
 	#[test]
+	fn full_ringbuffer() {
+		let (s, r)    = mpsc::channel();
+		let barrier   = Arc::new(AtomicBool::new(true));
+		let processor = {
+			let barrier = Arc::clone(&barrier);
+			move |e: &Event, _, _| {
+				while barrier.load(Relaxed) { /* Wait. */ }
+				s.send(e.num).expect("Should be able to send.");
+			}
+		};
+		let mut producer = build_single_producer(4, factory(), BusySpin)
+			.handle_events_with(processor)
+			.build();
+
+		for i in 0..4 {
+			producer.try_publish(|e| e.num = i).expect("Should publish");
+		}
+		// Now ring buffer is full.
+		assert_eq!(RingBufferFull, producer.try_publish(|e| e.num = 4).err().unwrap());
+		// And it stays full.
+		assert_eq!(RingBufferFull, producer.try_publish(|e| e.num = 4).err().unwrap());
+		// Until the processor continues reading events.
+		barrier.store(false, Relaxed);
+		producer.publish(|e| e.num = 4);
+
+		drop(producer);
+		let result: Vec<_> = r.iter().collect();
+		assert_eq!(result, [0, 1, 2, 3, 4]);
+	}
+
+	#[test]
+	fn insufficient_space_for_batch_publication() {
+		let (s, r)    = mpsc::channel();
+		let barrier   = Arc::new(AtomicBool::new(true));
+		let processor = {
+			let barrier = Arc::clone(&barrier);
+			move |e: &Event, _, _| {
+				while barrier.load(Relaxed) { /* Wait. */ }
+				s.send(e.num).expect("Should be able to send.");
+			}
+		};
+		let mut producer = build_single_producer(4, factory(), BusySpin)
+			.handle_events_with(processor)
+			.build();
+
+		for i in 0..2 {
+			producer.publish(|e| e.num = i);
+		}
+		assert_eq!(MissingFreeSlots(2),   producer.try_batch_publish(4, |_iter| {} ).err().unwrap());
+		assert_eq!(MissingFreeSlots(100), producer.try_batch_publish(102, |_iter| {} ).err().unwrap());
+
+		barrier.store(false, Relaxed);
+		drop(producer);
+
+		let result: Vec<_> = r.iter().collect();
+		assert_eq!(result, [0, 1]);
+	}
+
+	#[test]
 	fn spsc_disruptor() {
-		let factory   = || { Event { num: -1 }};
 		let (s, r)    = mpsc::channel();
 		let processor = move |e: &Event, _, _| {
 			s.send(e.num).expect("Should be able to send.");
 		};
-
-		let mut producer = build_single_producer(8, factory, BusySpin)
+		let mut producer = build_single_producer(8, factory(), BusySpin)
 			.handle_events_with(processor)
 			.build();
+
 		thread::scope(|s| {
 			s.spawn(move || {
 				for i in 0..10 {
@@ -246,8 +313,32 @@ mod tests {
 	}
 
 	#[test]
+	fn spsc_disruptor_with_batch_publication() {
+		let (s, r)    = mpsc::channel();
+		let processor = move |e: &Event, _, _| {
+			s.send(e.num).expect("Should be able to send.");
+		};
+		let mut producer = build_single_producer(8, factory(), BusySpin)
+			.handle_events_with(processor)
+			.build();
+
+		let mut i = 0;
+		for _ in 0..3 {
+			producer.batch_publish(3, |iter| {
+				for e in iter {
+					e.num = i*i;
+					i    += 1;
+				}
+			});
+		}
+		drop(producer);
+
+		let result: Vec<_> = r.iter().collect();
+		assert_eq!(result, [0, 1, 4, 9, 16, 25, 36, 49, 64]);
+	}
+
+	#[test]
 	fn spsc_disruptor_with_state() {
-		let factory          = || { Event { num: -1 }};
 		let (s, r)           = mpsc::channel();
 		let initialize_state = || { Rc::new(RefCell::new(0)) };
 		let processor        = move |state: &mut Rc<RefCell<i64>>, e: &Event, _, _| {
@@ -255,32 +346,28 @@ mod tests {
 			*ref_cell       += e.num;
 			s.send(*ref_cell).expect("Should be able to send.");
 		};
-
-		let mut producer = build_single_producer(8, factory, BusySpin)
+		let mut producer     = build_single_producer(8, factory(), BusySpin)
 			.handle_events_and_state_with(processor, initialize_state)
 			.build();
-		thread::scope(|s| {
-			s.spawn(move || {
-				for i in 0..10 {
-					producer.publish(|e| e.num = i );
-				}
-			});
-		});
 
+		for i in 0..10 {
+			producer.publish(|e| e.num = i );
+		}
+
+		drop(producer);
 		let result: Vec<_> = r.iter().collect();
 		assert_eq!(result, [0, 1, 3, 6, 10, 15, 21, 28, 36, 45]);
 	}
 
 	#[test]
 	fn pipeline_of_two_spsc_disruptors() {
-		let factory   = || { Event { num: -1 }};
 		let (s, r)    = mpsc::channel();
 		let processor = move |e: &Event, _, _| {
 			s.send(e.num).expect("Should be able to send.");
 		};
 
 		// Last Disruptor.
-		let mut producer = build_single_producer(8, factory, BusySpin)
+		let mut producer = build_single_producer(8, factory(), BusySpin)
 			.handle_events_with(processor)
 			.build();
 		let processor = move |e: &Event, _, _| {
@@ -288,30 +375,26 @@ mod tests {
 		};
 
 		// First Disruptor.
-		let mut producer = build_single_producer(8, factory, BusySpin)
+		let mut producer = build_single_producer(8, factory(), BusySpin)
 			.handle_events_with(processor)
 			.build();
-		thread::scope(|s| {
-			s.spawn(move || {
-				for i in 0..10 {
-					producer.publish(|e| e.num = i*i );
-				}
-			});
-		});
+		for i in 0..10 {
+			producer.publish(|e| e.num = i*i );
+		}
 
+		drop(producer);
 		let result: Vec<_> = r.iter().collect();
 		assert_eq!(result, [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]);
 	}
 
 	#[test]
 	fn multi_publisher_disruptor() {
-		let factory   = || { Event { num: -1 }};
 		let (s, r)    = mpsc::channel();
 		let processor = move |e: &Event, _, _| {
 			s.send(e.num).expect("Should be able to send.");
 		};
 
-		let mut producer1 = build_multi_producer(8, factory, BusySpin)
+		let mut producer1 = build_multi_producer(8, factory(), BusySpin)
 			.handle_events_with(processor)
 			.build();
 		let mut producer2 = producer1.clone();
@@ -339,7 +422,47 @@ mod tests {
 		assert_eq!(result, expected);
 	}
 
-	#[test] #[cfg_attr(miri, ignore)]
+	#[test]
+	fn multi_publisher_disruptor_with_batch_publication() {
+		let (s, r)    = mpsc::channel();
+		let processor = move |e: &Event, _, _| {
+			s.send(e.num).expect("Should be able to send.");
+		};
+
+		let mut producer1 = build_multi_producer(8, factory(), BusySpin)
+			.handle_events_with(processor)
+			.build();
+		let mut producer2 = producer1.clone();
+
+		let num_items  = 100_i64;
+		let batch_size = 5;
+
+		thread::scope(|s| {
+			s.spawn(move || {
+				for b in 0..(num_items/2)/batch_size {
+					producer1.batch_publish(batch_size as usize, |iter| {
+						for (i, e) in iter.enumerate() {
+							e.num = batch_size*b + i as i64;
+						}
+					});
+				}
+			});
+
+			s.spawn(move || {
+				for i in (num_items/2)..num_items {
+					producer2.publish(|e| e.num = i as i64);
+				}
+			});
+		});
+
+		let mut result: Vec<_> = r.iter().collect();
+		result.sort();
+
+		let expected: Vec<i64> = (0..num_items).collect();
+		assert_eq!(result, expected);
+	}
+
+	#[test]
 	fn spmc_with_concurrent_consumers() {
 		let (s, r) = mpsc::channel();
 
@@ -355,10 +478,9 @@ mod tests {
 			move |e: &Event, _, _| { s.send(e.num + 3).unwrap(); }
 		};
 
-		let factory      = || { Event { num: -1 }};
-		let builder      = build_single_producer(8, factory, BusySpin);
+		let builder      = build_single_producer(8, factory(), BusySpin);
 		let mut producer = builder
-			.pined_at_core(1).thread_named("my_thread").handle_events_with(processor1)
+			.handle_events_with(processor1)
 			.handle_events_with(processor2)
 			.handle_events_with(processor3)
 			.build();
@@ -387,8 +509,7 @@ mod tests {
 			move |e: &Event, _, _| { s.send(e.num + 3).unwrap(); }
 		};
 
-		let factory      = || { Event { num: -1 }};
-		let builder      = build_single_producer(8, factory, BusySpin);
+		let builder      = build_single_producer(8, factory(), BusySpin);
 
 		let mut producer = builder
 			.handle_events_with(processor1)
@@ -433,8 +554,7 @@ mod tests {
 			move |e: &Event, _, _| { s.send(e.num + 6).unwrap(); }
 		};
 
-		let factory      = || { Event { num: -1 }};
-		let builder      = build_multi_producer(8, factory, BusySpin);
+		let builder      = build_multi_producer(8, factory(), BusySpin);
 		let mut producer1 = builder
 			.handle_events_with(processor1)
 			.handle_events_with(processor2)

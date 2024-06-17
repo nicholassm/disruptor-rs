@@ -30,8 +30,9 @@ where
 	where
 		F: FnOnce(&mut E)
 	{
-		self.next_sequence()?;
-		self.apply_update(update)
+		self.next_sequences(1).map_err(|_| RingBufferFull)?;
+		let sequence = self.apply_update(update);
+		Ok(sequence)
 	}
 
 	#[inline]
@@ -39,8 +40,29 @@ where
 	where
 		F: FnOnce(&mut E)
 	{
-		while let Err(RingBufferFull) = self.next_sequence() { /* Empty. */ }
-		self.apply_update(update).expect("Ringbuffer should not be full.");
+		while self.next_sequences(1).is_err() { /* Empty. */ }
+		self.apply_update(update);
+	}
+
+	#[inline]
+	fn try_batch_publish<'a, F>(&'a mut self, n: usize, update: F) -> Result<Sequence, MissingFreeSlots>
+	where
+		E: 'a,
+		F: FnOnce(MutBatchIter<'a, E>)
+	{
+		self.next_sequences(n)?;
+		let sequence = self.apply_updates(n, update);
+		Ok(sequence)
+	}
+
+	#[inline]
+	fn batch_publish<'a, F>(&'a mut self, n: usize, update: F)
+	where
+		E: 'a,
+		F: FnOnce(MutBatchIter<'a, E>)
+	{
+		while self.next_sequences(n).is_err() { /* Empty. */ }
+		self.apply_updates(n, update);
 	}
 }
 
@@ -69,31 +91,33 @@ where
 	}
 
 	#[inline]
-	fn next_sequence(&mut self) -> Result<Sequence, RingBufferFull> {
-		let sequence = self.sequence;
+	fn next_sequences(&mut self, n: usize) -> Result<Sequence, MissingFreeSlots> {
+		let n      = n as i64;
+		let n_next = self.sequence - 1 + n;
 
-		if self.sequence_clear_of_consumers < sequence {
+		if self.sequence_clear_of_consumers < n_next {
 			// We have to check where the consumers are in case we're about to overwrite a slot
 			// which is still being read.
-			// (The slowest consumer is an entire ring buffer behind the producer).
-			let wrap_point                 = self.ring_buffer.wrap_point(sequence);
-			let lowest_sequence_being_read = self.consumer_barrier.get_after(sequence) + 1;
-			if lowest_sequence_being_read == wrap_point {
-				return Err(RingBufferFull);
+			// (The slowest consumer is too far behind the producer to publish next n events).
+			let last_published     = self.sequence - 1;
+			let rear_sequence_read = self.consumer_barrier.get_after(last_published);
+			let free_slots         = self.ring_buffer.free_slots(last_published, rear_sequence_read);
+			if free_slots < n {
+				return Err(MissingFreeSlots((n - free_slots) as u64));
 			}
 			fence(Ordering::Acquire);
 
 			// We can now continue until we get right behind the slowest consumer's current
 			// position without checking where it actually is.
-			self.sequence_clear_of_consumers = lowest_sequence_being_read + self.ring_buffer.size() - 1;
+			self.sequence_clear_of_consumers += free_slots;
 		}
 
-		Ok(sequence)
+		Ok(n_next)
 	}
 
 	/// Precondition: `sequence` is available for publication.
 	#[inline]
-	fn apply_update<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull>
+	fn apply_update<F>(&mut self, update: F) -> Sequence
 	where
 		F: FnOnce(&mut E)
 	{
@@ -107,7 +131,28 @@ where
 		self.producer_barrier.publish(sequence);
 		// Update sequence that will be published the next time.
 		self.sequence += 1;
-		Ok(sequence)
+		sequence
+	}
+
+	/// Precondition: `sequence` and next `n - 1` sequences are available for publication.
+	#[inline]
+	fn apply_updates<'a, F>(&'a mut self, n: usize, updates: F) -> Sequence
+	where
+		E: 'a,
+		F: FnOnce(MutBatchIter<'a, E>)
+	{
+		let n     = n as i64;
+		let lower = self.sequence;
+		let upper = lower + n - 1;
+		// SAFETY: Now, we have exclusive access to the events between `lower` and `upper` and
+		// a producer can update the data.
+		let iter  = MutBatchIter::new(lower, upper, &self.ring_buffer);
+		updates(iter);
+		// Publish batch by publishing `upper`.
+		self.producer_barrier.publish(upper);
+		// Update sequence that will be published the next time.
+		self.sequence += n;
+		upper
 	}
 }
 

@@ -1,10 +1,11 @@
 //! Module with different producer handles for publishing into the Disruptor.
+use thiserror::Error;
 
 pub mod single;
 pub mod multi;
 
 use std::sync::{atomic::AtomicI64, Arc};
-use crate::{barrier::Barrier, Sequence};
+use crate::{barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 
 /// Barrier for producers.
 #[doc(hidden)]
@@ -21,26 +22,84 @@ pub trait ProducerBarrier : Barrier {
 ///
 /// Client code can then take appropriate action, e.g. discard data or even panic as this indicates
 /// that the consumers cannot keep up - i.e. latency.
-#[derive(Debug)]
+#[derive(Debug, Error, PartialEq)]
+#[error("Ring Buffer is full.")]
 pub struct RingBufferFull;
+
+/// The Ring Buffer was missing a number of free slots for doing the batch publication.
+#[derive(Debug, Error, PartialEq)]
+#[error("Missing free slots in Ring Buffer: {0}")]
+pub struct MissingFreeSlots(pub u64);
+
+/// Iterator for events that can be batch updated.
+pub struct MutBatchIter<'a, E> {
+	ring_buffer: &'a RingBuffer<E>,
+	current:     Sequence, // Inclusive.
+	last:        Sequence, // Inclusive.
+}
+
+impl<'a, E> MutBatchIter<'a, E> {
+	fn new(start: Sequence, end: Sequence, ring_buffer: &'a RingBuffer<E>) -> Self {
+		Self {
+			ring_buffer,
+			current: start,
+			last:    end,
+		}
+	}
+
+	fn remaining(&self) -> usize {
+		(self.last - self.current + 1) as usize
+	}
+}
+
+impl<'a, E> Iterator for MutBatchIter<'a, E> {
+	type Item = &'a mut E;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if self.current > self.last {
+			None
+		}
+		else {
+			let event_ptr = self.ring_buffer.get(self.current);
+			// Safety: Iterator has exclusive access to event.
+			let event     = unsafe { &mut *event_ptr };
+			self.current += 1;
+			Some(event)
+		}
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		let remaining = self.remaining();
+		(remaining, Some(remaining))
+	}
+
+	fn count(self) -> usize
+	where
+		Self: Sized,
+	{
+		self.remaining()
+	}
+}
 
 /// Producer used for publishing into the Disruptor.
 ///
-/// A `Producer` has two methods for publication:
-/// 1. `try_publish` and
-/// 2. `publish`
+/// A `Producer` has two pairs of methods for publication:
+/// 1. `try_publish` and `publish`,
+/// 2. `try_batch_publish` and `batch_publish`.
 ///
-/// It is recommended to use `try_publish` and handle the [`RingBufferFull`] error as appropriate in
-/// the application.
+/// It is recommended to use the `try_` variants and handle either the [`RingBufferFull`] error for
+/// the `try_publish` case or the [`MissingFreeSlots`] error for the `try_batch_publish` case as
+/// appropriate in the application.
 ///
 /// Note, that a [`RingBufferFull`] error indicates that the consumer logic cannot keep up with the
 /// data ingestion rate and that latency is increasing. Therefore, the safe route is to panic the
 /// application instead of sending latent data out. (Of course appropriate action should be taken to
 /// make e.g. prices indicative in a price engine or cancel all open orders in a trading
 /// application before panicking.)
+/// This could also be the case for a [`MissingFreeSlots`] error but not necessarily. That depends on
+/// the application.
 pub trait Producer<E> {
 	/// Publish an Event into the Disruptor.
-	///
 	/// Returns a `Result` with the published sequence number or a [RingBufferFull] in case the
 	/// ring buffer is full.
 	///
@@ -64,9 +123,43 @@ pub trait Producer<E> {
 	///# }
 	/// ```
 	///
-	/// See also [`Self::publish`].
+	/// See also [`Self::publish`] and [`Self::try_batch_publish`].
 	fn try_publish<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull>
-	where F: FnOnce(&mut E);
+where F: FnOnce(&mut E);
+
+	/// Publish an Event into the Disruptor.
+	/// Returns a `Result` with the upper published sequence number or a [MissingFreeSlots] in case the
+	/// ring buffer did not have enough available slots for the batch.
+	///
+	/// # Examples
+	///
+	/// ```
+	///# use disruptor::*;
+	///#
+	/// // The example data entity on the ring buffer.
+	/// struct Event {
+	///     price: f64
+	/// }
+	///# fn main() -> Result<(), MissingFreeSlots> {
+	/// let factory = || { Event { price: 0.0 }};
+	///# let processor = |e: &Event, _, _| {};
+	///# let mut producer = build_single_producer(8, factory, BusySpin)
+	///#     .handle_events_with(processor)
+	///#     .build();
+	/// producer.try_batch_publish(3, |iter| {
+	///     for e in iter { // `iter` is guaranteed to yield 3 events.
+	///         e.price = 42.0;
+	///     }
+	/// })?;
+	///# Ok(())
+	///# }
+	/// ```
+	///
+	/// See also [`Self::batch_publish`] and [`Self::try_publish`].
+	fn try_batch_publish<'a, F>(&'a mut self, n: usize, update: F) -> Result<Sequence, MissingFreeSlots>
+	where
+		E: 'a,
+		F: FnOnce(MutBatchIter<'a, E>);
 
 	/// Publish an Event into the Disruptor.
 	///
@@ -89,7 +182,38 @@ pub trait Producer<E> {
 	/// producer.publish(|e| { e.price = 42.0; });
 	/// ```
 	///
-	/// See also [`Self::try_publish`].
+	/// See also [`Self::try_publish`] and [`Self::batch_publish`].
 	fn publish<F>(&mut self, update: F)
 	where F: FnOnce(&mut E);
+
+	/// Publish a batch of Events into the Disruptor.
+	///
+	/// Spins until there are enough available slots in the ring buffer.
+	///
+	/// # Examples
+	///
+	/// ```
+	///# use disruptor::*;
+	///#
+	/// // The example data entity on the ring buffer.
+	/// struct Event {
+	///     price: f64
+	/// }
+	/// let factory = || { Event { price: 0.0 }};
+	///# let processor = |e: &Event, _, _| {};
+	///# let mut producer = build_single_producer(8, factory, BusySpin)
+	///#     .handle_events_with(processor)
+	///#     .build();
+	/// producer.batch_publish(3, |iter| {
+	///     for e in iter { // `iter` is guaranteed to yield 3 events.
+	///         e.price = 42.0;
+	///     }
+	/// })
+	/// ```
+	///
+	/// See also [`Self::try_batch_publish`] and [`Self::publish`].
+	fn batch_publish<'a, F>(&'a mut self, n: usize, update: F)
+	where
+		E: 'a,
+		F: FnOnce(MutBatchIter<'a, E>);
 }

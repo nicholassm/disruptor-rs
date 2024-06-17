@@ -34,8 +34,14 @@ impl <E> RingBuffer<E> {
 	}
 
 	#[inline]
-	pub(crate) fn wrap_point(&self, sequence: Sequence) -> Sequence {
+	fn wrap_point(&self, sequence: Sequence) -> Sequence {
 		sequence - self.size()
+	}
+
+	#[inline]
+	pub(crate) fn free_slots(&self, producer: Sequence, highest_read_by_consumers: Sequence) -> i64 {
+		let wrap_point = self.wrap_point(producer);
+		highest_read_by_consumers - wrap_point
 	}
 
 	/// Callers must ensure that only a single mutable reference or multiple immutable references
@@ -51,5 +57,30 @@ impl <E> RingBuffer<E> {
 	#[inline]
 	pub(crate) fn size(&self) -> i64 {
 		self.slots.len() as i64
+	}
+}
+
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn free_slots() {
+		let ring_buffer = RingBuffer::new(8, || { 0 });
+		// Producer has published 0 and comsumer read 0.
+		assert_eq!(8, ring_buffer.free_slots(0, 0));
+		// Publisher has just published 7 and consumer is (still) reading 0.
+		assert_eq!(0, ring_buffer.free_slots(7, -1));
+		// Publisher has just published 7 and consumer has read 0.
+		assert_eq!(1, ring_buffer.free_slots(7, 0));
+		// Publisher has just released 5 and consumer has read 2.
+		assert_eq!(5, ring_buffer.free_slots(5, 2));
+		// Publisher has just released 5 and consumer has read 3.
+		assert_eq!(6, ring_buffer.free_slots(5, 3));
+		// Publisher has just released 5 and consumer has read 4.
+		assert_eq!(7, ring_buffer.free_slots(5, 4));
+		// Publisher has just released 5 and consumer has read 5.
+		assert_eq!(8, ring_buffer.free_slots(5, 5));
 	}
 }

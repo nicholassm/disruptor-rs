@@ -3,6 +3,8 @@ use crossbeam_utils::CachePadded;
 use crate::{barrier::{Barrier, NONE}, consumer::Consumer, producer::ProducerBarrier, ringbuffer::RingBuffer, producer::{Producer, RingBufferFull}, Sequence};
 use crate::cursor::Cursor;
 
+use super::{MissingFreeSlots, MutBatchIter};
+
 struct SharedProducer {
 	consumers: Vec<Consumer>,
 	counter:   AtomicI64,
@@ -34,8 +36,9 @@ where
 	where
 		F: FnOnce(&mut E)
 	{
-		self.next_sequence()?;
-		self.apply_update(update)
+		self.next_sequences(1).map_err(|_| RingBufferFull)?;
+		let sequence = self.apply_update(update);
+		Ok(sequence)
 	}
 
 	#[inline]
@@ -43,8 +46,29 @@ where
 	where
 		F: FnOnce(&mut E)
 	{
-		while let Err(RingBufferFull) = self.next_sequence() { /* Empty. */ }
-		self.apply_update(update).expect("Ringbuffer should not be full.");
+		while self.next_sequences(1).is_err() { /* Empty. */ }
+		self.apply_update(update);
+	}
+
+	#[inline]
+	fn try_batch_publish<'a, F>(&'a mut self, n: usize, update: F) -> Result<Sequence, MissingFreeSlots>
+	where
+		E: 'a,
+		F: FnOnce(MutBatchIter<'a, E>),
+	{
+		self.next_sequences(n)?;
+		let sequence = self.apply_updates(n, update);
+		Ok(sequence)
+	}
+
+	#[inline]
+	fn batch_publish<'a, F>(&'a mut self, n: usize, update: F)
+	where
+		E: 'a,
+		F: FnOnce(MutBatchIter<'a, E>)
+	{
+		while self.next_sequences(n).is_err() { /* Empty. */ }
+		self.apply_updates(n, update);
 	}
 }
 
@@ -111,7 +135,7 @@ where
 				}
 			)
 		);
-		let consumer_barrier = Arc::new(consumer_barrier);
+		let consumer_barrier            = Arc::new(consumer_barrier);
 		// Known to be available initially as consumers start at index 0.
 		let sequence_clear_of_consumers = ring_buffer.size() - 1;
 		MultiProducer {
@@ -126,42 +150,48 @@ where
 	}
 
 	#[inline]
-	fn next_sequence(&mut self) -> Result<Sequence, RingBufferFull> {
-		// We get the last produced sequence number and increment it for the next publisher.
-		// `sequence` is now exclusive for this producer.
-		// We need to store it, because the ring buffer could be full (and the producer barrier has
-		// already increased its publication counter so we *must* eventually use it for publication).
-		if self.claimed_sequence == NONE {
-			let next_sequence     = self.producer_barrier.next();
-			self.claimed_sequence = next_sequence;
-		}
+	fn next_sequences(&mut self, n: usize) -> Result<Sequence, MissingFreeSlots> {
+		let n           = n as i64;
+		// We get the last produced sequence number and try and increment it.
+		let mut current = self.producer_barrier.current();
+		let mut n_next  = current + n;
 
-		let sequence = self.claimed_sequence;
-		if self.sequence_clear_of_consumers < sequence {
-			// We have to check where the consumer is in case we're about to
-			// publish into the slot currently being read by the consumer.
-			// (Consumer is an entire ring buffer behind the producer).
-			let wrap_point                 = self.ring_buffer.wrap_point(sequence);
-			let lowest_sequence_being_read = self.consumer_barrier.get_after(sequence) + 1;
-			// `<=` because a producer can claim a sequence number that a consumer is still using
-			// before the wrap_point. (Compare with the single-threaded Producer that cannot claim
-			// a sequence number beyond the wrap_point).
-			if lowest_sequence_being_read <= wrap_point {
-				return Err(RingBufferFull);
+		loop {
+			if self.sequence_clear_of_consumers < n_next {
+				// We have to check where the consumer is in case we're about to
+				// publish into the slot currently being read by the consumer.
+				// (Consumer is too far behind the producer to publish next n events).
+				let rear_sequence_read = self.consumer_barrier.get_after(current);
+				let free_slots         = self.ring_buffer.free_slots(current, rear_sequence_read);
+				if free_slots < n {
+					return Err(MissingFreeSlots((n - free_slots) as u64));
+				}
+				fence(Ordering::Acquire);
+
+				// We now know how far we can continue until we get right behind the slowest consumers'
+				// current position without checking where they actually are.
+				self.sequence_clear_of_consumers += free_slots;
 			}
-			fence(Ordering::Acquire);
 
-			// We can now continue until we get right behind the consumer's current
-			// position without checking where it actually is.
-			self.sequence_clear_of_consumers = lowest_sequence_being_read + self.ring_buffer.size() - 1;
+			match self.producer_barrier.compare_exchange(current, n_next) {
+				Ok(_) => {
+					// The sequence interval `]current; n_next] is now exclusive for this producer.
+					self.claimed_sequence = n_next;
+					break;
+				}
+				Err(new_current) => {
+					current = new_current;
+					n_next  = current + n;
+				}
+			}
 		}
 
-		Ok(sequence)
+		Ok(n_next)
 	}
 
 	/// Precondition: `sequence` is available for publication.
 	#[inline]
-	fn apply_update<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull>
+	fn apply_update<F>(&mut self, update: F) -> Sequence
 	where
 		F: FnOnce(&mut E)
 	{
@@ -173,9 +203,28 @@ where
 		update(event);
 		// Make publication available by publishing `sequence`.
 		self.producer_barrier.publish(sequence);
-		// sequence is now used - replace it with None.
-		self.claimed_sequence = NONE;
-		Ok(sequence)
+		sequence
+	}
+
+	/// Precondition: `sequence` and previous `n - 1` sequences are available for publication.
+	#[inline]
+	fn apply_updates<'a, F>(&'a mut self, n: usize, updates: F) -> Sequence
+	where
+		E: 'a,
+		F: FnOnce(MutBatchIter<'a, E>)
+	{
+		let n      = n as i64;
+		let upper  = self.claimed_sequence;
+		let lower  = upper - n + 1;
+		// SAFETY: Now, we have exclusive access to the event at `sequence` and a producer
+		// can now update the data.
+		let iter   = MutBatchIter::new(lower, upper, &self.ring_buffer);
+		updates(iter);
+		// Make publications available by publishing all the sequences in the interval [lower; upper].
+		for sequence in lower..=upper {
+			self.producer_barrier.publish(sequence);
+		}
+		upper
 	}
 }
 
@@ -200,6 +249,16 @@ impl MultiProducerBarrier {
 
 	fn log2(i: usize) -> usize {
 		std::mem::size_of::<usize>()*8 - (i.leading_zeros() as usize) - 1
+	}
+
+	#[inline]
+	fn current(&self) -> Sequence {
+		self.cursor.relaxed_value()
+	}
+
+	#[inline]
+	fn compare_exchange(&self, current: Sequence, next: Sequence) -> Result<i64, i64> {
+		self.cursor.compare_exchange(current, next)
 	}
 
 	#[inline]

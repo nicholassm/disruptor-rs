@@ -79,6 +79,37 @@
 //! // the Producer are dropped.
 //! ```
 //!
+//! ### Batch Publication:
+//!
+//! ```
+//! use disruptor::*;
+//!
+//! // The data entity on the ring buffer.
+//! struct Event {
+//!     price: f64
+//! }
+//!
+//! let factory = || { Event { price: 0.0 }};
+//!
+//! let processor = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+//!     // Processing logic.
+//! };
+//!
+//! let mut producer = build_single_producer(8, factory, BusySpin)
+//!     .handle_events_with(processor)
+//!     .build();
+//!
+//! // Batch publish into the Disruptor - 5 events at a time.
+//! for i in 0..10 {
+//!     producer.batch_publish(5, |iter| {
+//!         // `iter` is guaranteed to yield 5 events.
+//!         for e in iter {
+//!             e.price = i as f64;
+//!         }
+//!     });
+//! }
+//! ```
+//!
 //! ###  Multiple Producers and Multiple, Pined Consumers:
 //! ```
 //! use disruptor::*;
@@ -335,6 +366,27 @@ mod tests {
 
 		let result: Vec<_> = r.iter().collect();
 		assert_eq!(result, [0, 1, 4, 9, 16, 25, 36, 49, 64]);
+	}
+
+	#[test]
+	fn spsc_disruptor_with_zero_batch_publication() {
+		let (s, r)    = mpsc::channel();
+		let processor = move |e: &Event, _, _| {
+			s.send(e.num).expect("Should be able to send.");
+		};
+		let mut producer = build_single_producer(8, factory(), BusySpin)
+			.handle_events_with(processor)
+			.build();
+
+		producer.batch_publish(0, |iter| {
+			for e in iter {
+				e.num = 1;
+			}
+		});
+		drop(producer);
+
+		let result: Vec<_> = r.iter().collect();
+		assert_eq!(result, []);
 	}
 
 	#[test]

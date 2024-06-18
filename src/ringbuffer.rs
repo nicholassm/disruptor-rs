@@ -68,8 +68,16 @@ mod tests {
 	#[test]
 	fn free_slots() {
 		let ring_buffer = RingBuffer::new(8, || { 0 });
+
+		// Round 1:
+		// Publisher has just published 7 and consumer has read 0.
+		assert_eq!(1, ring_buffer.free_slots(7, 0));
+		// Consumer had read 0 and the publisher has just published 8.
+		assert_eq!(0, ring_buffer.free_slots(8, 0));
 		// Producer has published 0 and comsumer read 0.
 		assert_eq!(8, ring_buffer.free_slots(0, 0));
+		// Publisher has just published 3 and consumer is (still) reading 0.
+		assert_eq!(4, ring_buffer.free_slots(3, -1));
 		// Publisher has just published 7 and consumer is (still) reading 0.
 		assert_eq!(0, ring_buffer.free_slots(7, -1));
 		// Publisher has just published 7 and consumer has read 0.
@@ -82,5 +90,13 @@ mod tests {
 		assert_eq!(7, ring_buffer.free_slots(5, 4));
 		// Publisher has just released 5 and consumer has read 5.
 		assert_eq!(8, ring_buffer.free_slots(5, 5));
+
+		// Round 2:
+		// Publisher has just published 11 and consumer has read 9.
+		assert_eq!(6, ring_buffer.free_slots(11, 9));
+		// Publisher has just published 12 and consumer has read 12.
+		assert_eq!(8, ring_buffer.free_slots(12, 12));
+		// Consumer has read 7 and the publisher has just published 15.
+		assert_eq!(0, ring_buffer.free_slots(15, 7));
 	}
 }

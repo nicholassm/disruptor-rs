@@ -84,12 +84,14 @@ impl<'a, E> Iterator for MutBatchIter<'a, E> {
 /// Producer used for publishing into the Disruptor.
 ///
 /// A `Producer` has two pairs of methods for publication:
-/// 1. `try_publish` and `publish`,
-/// 2. `try_batch_publish` and `batch_publish`.
+/// 1. **Single publication:** [try_publish](Self::try_publish) and [publish](Self::publish),
+/// 2. **Batch publication:** [try_batch_publish](Self::try_batch_publish) and [batch_publish](Self::batch_publish).
 ///
-/// It is recommended to use the `try_` variants and handle either the [`RingBufferFull`] error for
-/// the `try_publish` case or the [`MissingFreeSlots`] error for the `try_batch_publish` case as
-/// appropriate in the application.
+/// It is recommended to use the `try_` variants and handle the error as appropriate in the application.
+///
+/// There are two different error types: [try_publish](Self::try_publish) can return a [`RingBufferFull`] error and
+/// [try_batch_publish](Self::try_batch_publish) can return a [`MissingFreeSlots`] error with the number of missing
+/// slots for publication of a batch.
 ///
 /// Note, that a [`RingBufferFull`] error indicates that the consumer logic cannot keep up with the
 /// data ingestion rate and that latency is increasing. Therefore, the safe route is to panic the
@@ -125,11 +127,13 @@ pub trait Producer<E> {
 	///
 	/// See also [`Self::publish`] and [`Self::try_batch_publish`].
 	fn try_publish<F>(&mut self, update: F) -> Result<Sequence, RingBufferFull>
-where F: FnOnce(&mut E);
+	where F: FnOnce(&mut E);
 
-	/// Publish an Event into the Disruptor.
+	/// Publish a batch of Events into the Disruptor.
 	/// Returns a `Result` with the upper published sequence number or a [MissingFreeSlots] in case the
 	/// ring buffer did not have enough available slots for the batch.
+	///
+	/// Note, publishing a batch of zero elements is a no-op (only wasting cycles).
 	///
 	/// # Examples
 	///
@@ -189,6 +193,8 @@ where F: FnOnce(&mut E);
 	/// Publish a batch of Events into the Disruptor.
 	///
 	/// Spins until there are enough available slots in the ring buffer.
+	///
+	/// Note, publishing a batch of zero elements is a no-op (only wasting cycles).
 	///
 	/// # Examples
 	///

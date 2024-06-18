@@ -257,5 +257,4 @@ Changes are accepted solely at my discretion and I will focus on whether the cha
 
 # Roadmap
 
-1. Add a Sleeping Wait Strategy.
-2. Support for batch publication.
+Empty! All the items have been implemented.

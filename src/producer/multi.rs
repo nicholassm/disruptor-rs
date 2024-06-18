@@ -158,8 +158,8 @@ where
 
 		loop {
 			if self.sequence_clear_of_consumers < n_next {
-				// We have to check where the consumer is in case we're about to
-				// publish into the slot currently being read by the consumer.
+				// We have to check where the rear consumer is in case we're about to
+				// publish into the slot currently being read by the slowest consumer.
 				// (Consumer is too far behind the producer to publish next n events).
 				let rear_sequence_read = self.consumer_barrier.get_after(current);
 				let free_slots         = self.ring_buffer.free_slots(current, rear_sequence_read);
@@ -170,7 +170,7 @@ where
 
 				// We now know how far we can continue until we get right behind the slowest consumers'
 				// current position without checking where they actually are.
-				self.sequence_clear_of_consumers += free_slots;
+				self.sequence_clear_of_consumers = current + free_slots;
 			}
 
 			match self.producer_barrier.compare_exchange(current, n_next) {
@@ -232,6 +232,12 @@ where
 #[doc(hidden)]
 pub struct MultiProducerBarrier {
 	cursor:      Cursor,
+	/// For each slot, an `AtomicI32` tracks its availability.
+	/// The value encodes what "round" the event is available in to avoid producers having to
+	/// coordinate directly (with the added overhead).
+	/// Note, producers can never "overtake" each other and overwrite the availability of an event
+	/// in the "previous" round as all producers must wait for the consumer furtherst behind (which
+	/// is again blocked by the slowest producer).
 	available:   Box<[CachePadded<AtomicI32>]>,
 	index_mask:  usize,
 	index_shift: usize,

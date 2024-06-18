@@ -109,7 +109,7 @@ where
 
 			// We can now continue until we get right behind the slowest consumer's current
 			// position without checking where it actually is.
-			self.sequence_clear_of_consumers += free_slots;
+			self.sequence_clear_of_consumers = last_published + free_slots;
 		}
 
 		Ok(n_next)

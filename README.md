@@ -13,11 +13,11 @@ It's heavily inspired by the brilliant
 
 Add the following to your `Cargo.toml` file:
 
-    disruptor = "2.1.0"
+    disruptor = "2.2.0"
 
 To read details of how to use the library, check out the documentation on [docs.rs/disruptor](https://docs.rs/disruptor).
 
-Here's a minimal example:
+Here's a minimal example demonstrating both single and batch publication. Note, batch publication should be used whenever possible for best latency and throughput (see benchmarks below).
 
 ```rust
 use disruptor::*;
@@ -41,12 +41,19 @@ fn main() {
         .handle_events_with(processor)
         .build();
 
-    // Publish into the Disruptor via the `Producer` handle.
+    // Publish single events into the Disruptor via the `Producer` handle.
     for i in 0..10 {
         producer.publish(|e| {
             e.price = i as f64;
         });
     }
+
+    // Publish a batch of events into the Disruptor.
+    producer.publish_batch(5, |iter| {
+        for e in iter { // `iter` is guaranteed to yield 5 events.
+            e.price = 42.0;
+        }
+    });
 }// At this point, the Producer instance goes out of scope and when the
  // processor is done handling all events then the Disruptor is dropped
  // as well.
@@ -155,6 +162,7 @@ fn main() {
 - [x] Multi Producer Single Consumer (MPSC).
 - [x] Multi Producer Multi Consumer (MPMC) with consumer interdependencies.
 - [x] Busy-spin wait strategies.
+- [x] Batch publication of events.
 - [x] Batch consumption of events.
 - [x] Thread affinity can be set for the event processor thread(s).
 - [x] Set thread name of each event processor thread.
@@ -187,17 +195,17 @@ The latencies below are the mean latency per element with 95% confidence interva
 
 |  Burst Size | Crossbeam | Disruptor | Improvement |
 |------------:|----------:|----------:|------------:|
-|           1 |     53 ns |     35 ns |         34% |
-|          10 |     71 ns |     29 ns |         59% |
-|         100 |     34 ns |     31 ns |          9% |
+|           1 |     65 ns |     32 ns |         51% |
+|          10 |     68 ns |      9 ns |         87% |
+|         100 |     29 ns |      8 ns |         72% |
 
 *Throughput:*
 
 |  Burst Size |  Crossbeam |   Disruptor | Improvement |
 |------------:|-----------:|------------:|------------:|
-|           1 |  19.0M / s |   28.7M / s |         51% |
-|          10 |  14.2M / s |   34.8M / s |        145% |
-|         100 |  29.7M / s |   31.9M / s |          7% |
+|           1 |  15.2M / s |   31.7M / s |        109% |
+|          10 |  14.5M / s |  117.3M / s |        709% |
+|         100 |  34.3M / s |  119.7M / s |        249% |
 
 ## 1 ms Pause Between Bursts
 
@@ -205,17 +213,17 @@ The latencies below are the mean latency per element with 95% confidence interva
 
 |  Burst Size | Crossbeam |  Disruptor | Improvement |
 |------------:|----------:|-----------:|------------:|
-|           1 |     52 ns |      35 ns |         32% |
-|          10 |     71 ns |      31 ns |         56% |
-|         100 |     33 ns |      29 ns |         12% |
+|           1 |     63 ns |      33 ns |         48% |
+|          10 |     67 ns |       8 ns |         88% |
+|         100 |     30 ns |       9 ns |         70% |
 
 *Throughput:*
 
-|  Burst Size |  Crossbeam | Disruptor | Improvement |
-|------------:|-----------:|----------:|------------:|
-|           1 |  19.0M / s | 28.5M / s |         50% |
-|          10 |  14.1M / s | 32.6M / s |        131% |
-|         100 |  30.6M / s | 34.4M / s |         12% |
+|  Burst Size |  Crossbeam |  Disruptor | Improvement |
+|------------:|-----------:|-----------:|------------:|
+|           1 |  15.9M / s |  30.7M / s |         93% |
+|          10 |  14.9M / s | 117.7M / s |        690% |
+|         100 |  33.8M / s | 105.0M / s |        211% |
 
 ## 10 ms Pause Between Bursts
 
@@ -223,21 +231,22 @@ The latencies below are the mean latency per element with 95% confidence interva
 
 |  Burst Size | Crossbeam | Disruptor | Improvement |
 |------------:|----------:|----------:|------------:|
-|           1 |     56 ns |     35 ns |         38% |
-|          10 |     75 ns |     29 ns |         61% |
-|         100 |     35 ns |     31 ns |         11% |
+|           1 |     51 ns |     32 ns |         37% |
+|          10 |     67 ns |      9 ns |         87% |
+|         100 |     30 ns |     10 ns |         67% |
 
 *Throughput:*
 
-|  Burst Size | Crossbeam | Disruptor | Improvement |
-|------------:|----------:|----------:|------------:|
-|           1 | 18.0M / s | 28.8M / s |         60% |
-|          10 | 13.3M / s | 35.0M / s |        163% |
-|         100 | 28.7M / s | 32.4M / s |         13% |
+|  Burst Size | Crossbeam |  Disruptor | Improvement |
+|------------:|----------:|-----------:|------------:|
+|           1 | 19.5M / s |  31.6M / s |         62% |
+|          10 | 14.9M / s | 114.5M / s |        668% |
+|         100 | 33.6M / s | 105.0M / s |        213% |
 
 ## Conclusion
 
-There's clearly a difference between the Disruptor and the Crossbeam libs. However, this is not because the Crossbeam library is not a great piece of software. It is. The Disruptor trades CPU and memory resources for lower latency and higher throughput and that is why it's able to achieve these results.
+There's clearly a difference between the Disruptor and the Crossbeam libs. However, this is not because the Crossbeam library is not a great piece of software. It is. The Disruptor trades CPU and memory resources for lower latency and higher throughput and that is why it's able to achieve these results. The Disruptor also excels if you can publish batches of events as
+demonstrated in the benchmarks with bursts of 10 and 100 events.
 
 Both libraries greatly improves as the burst size goes up but the Disruptor's performance is more resilient to the pauses between bursts which is one of the design goals.
 

@@ -4,10 +4,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput, BenchmarkGroup};
 use criterion::measurement::WallTime;
-use crossbeam::channel::bounded;
+use crossbeam::channel::TrySendError::Full;
+use crossbeam::channel::{bounded, TryRecvError::{Empty, Disconnected}};
 use disruptor::{BusySpin, Producer};
 
-const DATA_STRUCTURE_SIZE: usize = 64;
+const DATA_STRUCTURE_SIZE: usize = 128;
 const BURST_SIZES: [u64; 3]      = [1, 10, 100];
 const PAUSES_MS: [u64; 3]        = [0,  1,  10];
 
@@ -65,8 +66,12 @@ fn crossbeam(group: &mut BenchmarkGroup<WallTime>, inputs: (i64, u64), param: &s
 	let receiver = {
 		let sink = Arc::clone(&sink);
 		thread::spawn(move || {
-			while let Ok(event) = r.recv() {
-				sink.store(event.data, Ordering::Release);
+			loop {
+				match r.try_recv() {
+					Ok(event)         => sink.store(event.data, Ordering::Release),
+					Err(Empty)        => continue,
+					Err(Disconnected) => break,
+				}
 			}
 		})
 	};
@@ -76,7 +81,13 @@ fn crossbeam(group: &mut BenchmarkGroup<WallTime>, inputs: (i64, u64), param: &s
 		let start = Instant::now();
 		for _ in 0..iters {
 			for data in 1..=*size {
-				s.send(Event { data: black_box(data) }).expect("Should successfully send.");
+				let mut event = Event { data: black_box(data) };
+				loop {
+					match s.try_send(event) {
+						Err(Full(e)) => event = e,
+						_            => break,
+					}
+				}
 			}
 			// Wait for the last data element to be received in the receiver thread.
 			let last_data = black_box(*size);
@@ -105,11 +116,11 @@ fn disruptor(group: &mut BenchmarkGroup<WallTime>, inputs: (i64, u64), param: &s
 		pause(*pause_ms);
 		let start = Instant::now();
 		for _ in 0..iters {
-			for data in 1..=*size {
-				producer.publish(|e| {
-					e.data = black_box(data);
-				});
-			}
+			producer.batch_publish(*size as usize, |iter| {
+				for (i, e) in iter.enumerate() {
+					e.data = black_box(i as i64 + 1);
+				}
+			});
 			// Wait for the last data element to be received inside processor.
 			let last_data = black_box(*size);
 			while sink.load(Ordering::Acquire) != last_data {}

@@ -4,13 +4,15 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use crossbeam::channel::*;
+use std::hint::black_box;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use disruptor::{build_multi_producer, build_single_producer, BusySpin, Producer};
 
-const BUF_SIZE: usize = 32_768;
+const BUF_SIZE:            usize = 32_768;
 const MAX_PRODUCER_EVENTS: usize = 10_000_000;
+const BATCH_SIZE:          usize = 2_000;
 
 fn crossbeam_spsc() {
     let (s, r) = bounded(BUF_SIZE);
@@ -27,8 +29,7 @@ fn crossbeam_spsc() {
     // Consumer
     let c1: JoinHandle<()> = thread::spawn(move || {
         for msg in r {
-            let tmp = msg;
-            sink_clone.fetch_add(tmp, Ordering::Release);
+            sink_clone.fetch_add(msg, Ordering::Release);
         }
     });
 
@@ -36,7 +37,6 @@ fn crossbeam_spsc() {
     let _ = c1.join();
 
     sink.load(Ordering::Acquire);
-    //println!("crossbeam_spsc total_events_count: {}", sink.load(Ordering::Acquire));
 }
 
 fn crossbeam_mpsc() {
@@ -46,14 +46,14 @@ fn crossbeam_mpsc() {
     // Producer 1
     let t1 = thread::spawn(move || {
         for _ in 0..MAX_PRODUCER_EVENTS {
-            s.send(1).unwrap();
+            s.send(black_box(1)).unwrap();
         }
     });
 
     // Producer 2
     let t2 = thread::spawn(move || {
         for _ in 0..MAX_PRODUCER_EVENTS {
-            s2.send(1).unwrap();
+            s2.send(black_box(1)).unwrap();
         }
     });
 
@@ -62,8 +62,7 @@ fn crossbeam_mpsc() {
     // Consumer
     let c1: JoinHandle<()> = thread::spawn(move || {
         for msg in r {
-            let tmp = msg;
-            sink_clone.fetch_add(tmp, Ordering::Release);
+            sink_clone.fetch_add(msg, Ordering::Release);
         }
     });
 
@@ -108,17 +107,17 @@ fn disruptor_spsc() {
     };
 
     let mut producer = build_single_producer(BUF_SIZE, factory, BusySpin)
-        .handle_events_with(
-            processor
-        )
+        .handle_events_with(processor)
         .build();
 
     // Publish into the Disruptor.
     thread::scope(|s| {
         s.spawn(move || {
-            for _ in 0..MAX_PRODUCER_EVENTS {
-                producer.publish(|e| {
-                    e.val = 1 as i32;
+            for _ in 0..MAX_PRODUCER_EVENTS/BATCH_SIZE {
+                producer.batch_publish(BATCH_SIZE, |iter| {
+                    for e in iter {
+                        e.val = black_box(1);
+                    }
                 });
             }
         });
@@ -140,9 +139,7 @@ fn disruptor_mpsc() {
     };
 
     let mut producer1 = build_multi_producer(BUF_SIZE, factory, BusySpin)
-        .handle_events_with(
-            processor
-        )
+        .handle_events_with(processor)
         .build();
 
     let mut producer2 = producer1.clone();
@@ -150,17 +147,21 @@ fn disruptor_mpsc() {
     // Publish into the Disruptor.
     thread::scope(|s| {
         s.spawn(move || {
-            for _ in 0..MAX_PRODUCER_EVENTS {
-                producer1.publish(|e| {
-                    e.val = 1 as i32;
+            for _ in 0..MAX_PRODUCER_EVENTS/BATCH_SIZE {
+                producer1.batch_publish(BATCH_SIZE, |iter| {
+                    for e in iter {
+                        e.val = black_box(1);
+                    }
                 });
             }
         });
 
         s.spawn(move || {
-            for _ in 0..MAX_PRODUCER_EVENTS {
-                producer2.publish(|e| {
-                    e.val = 1 as i32;
+            for _ in 0..MAX_PRODUCER_EVENTS/BATCH_SIZE {
+                producer2.batch_publish(BATCH_SIZE, |iter| {
+                    for e in iter {
+                        e.val = 1;
+                    }
                 });
             }
         });

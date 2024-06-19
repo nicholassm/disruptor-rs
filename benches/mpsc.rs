@@ -4,12 +4,13 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput, BenchmarkGroup};
 use criterion::measurement::WallTime;
-use crossbeam::channel::bounded;
+use crossbeam::channel::TrySendError::Full;
+use crossbeam::channel::{bounded, TryRecvError::{Empty, Disconnected}};
 use crossbeam_utils::CachePadded;
 use disruptor::{BusySpin, Producer};
 
-const PRODUCERS:           usize    = 3;
-const DATA_STRUCTURE_SIZE: usize    = 64;
+const PRODUCERS:           usize    = 2;
+const DATA_STRUCTURE_SIZE: usize    = 256;
 const BURST_SIZES:         [u64; 3] = [1, 10, 100];
 const PAUSES_MS:           [u64; 3] = [0,  1,  10];
 
@@ -42,6 +43,9 @@ pub fn mpsc_benchmark(c: &mut Criterion) {
 	group.finish();
 }
 
+/// Structure for managing all producer threads so they can produce a burst again and again in
+/// a benchmark after being released from a barrier. This is to avoid the overhead of creating
+/// new threads for each sample.
 struct BurstProducer {
 	start_barrier: Arc<CachePadded<AtomicBool>>,
 	stop:          Arc<CachePadded<AtomicBool>>,
@@ -61,8 +65,8 @@ impl BurstProducer {
 			let start_barrier = Arc::clone(&start_barrier);
 			thread::spawn(move || {
 				while !stop.load(Acquire) {
+					// Busy spin with a check if we're done.
 					while start_barrier.compare_exchange(true, false, Acquire, Relaxed).is_err() {
-						// Busy spin with a check if we're done.
 						if stop.load(Acquire) { return; }
 					}
 					produce_one_burst();
@@ -140,9 +144,15 @@ fn crossbeam(group: &mut BenchmarkGroup<WallTime>, params: (i64, u64), param_des
 	let receiver = {
 		let sink = Arc::clone(&sink);
 		thread::spawn(move || {
-			while let Ok(event) = r.recv() {
-				black_box(event.data);
-				sink.fetch_add(1, Release);
+			loop {
+				match r.try_recv() {
+					Ok(event)         => {
+						black_box(event.data);
+						sink.fetch_add(1, Release);
+					},
+					Err(Empty)        => continue,
+					Err(Disconnected) => break,
+				}
 			}
 		})
 	};
@@ -155,8 +165,14 @@ fn crossbeam(group: &mut BenchmarkGroup<WallTime>, params: (i64, u64), param_des
 			let s          = s.clone();
 			BurstProducer::new(move || {
 				let burst_size = burst_size.load(Acquire);
-				for data in 1..=burst_size {
-					s.send(Event { data: black_box(data) }).expect("Should successfully send.");
+				for data in 0..burst_size {
+					let mut event = Event { data: black_box(data) };
+					loop {
+						match s.try_send(event) {
+							Err(Full(e)) => event = e,
+							_            => break,
+						}
+					}
 				}
 			})
 		})
@@ -193,11 +209,11 @@ fn disruptor(group: &mut BenchmarkGroup<WallTime>, params: (i64, u64), param_des
 			let mut producer = producer.clone();
 			BurstProducer::new(move || {
 				let burst_size = burst_size.load(Acquire);
-				for data in 1..=burst_size {
-					producer.publish(|e| {
-						e.data = black_box(data);
-					});
-				}
+				producer.batch_publish(burst_size as usize, |iter| {
+					for (i, e) in iter.enumerate() {
+						e.data = black_box(i as i64);
+					}
+				});
 			})
 		})
 		.collect::<Vec<BurstProducer>>();

@@ -448,7 +448,7 @@ mod tests {
 			s.send(e.num).expect("Should be able to send.");
 		};
 
-		let mut producer1 = build_multi_producer(8, factory(), BusySpin)
+		let mut producer1 = build_multi_producer(8, factory(), BusySpinWithSpinLoopHint)
 			.handle_events_with(processor)
 			.build();
 		let mut producer2 = producer1.clone();

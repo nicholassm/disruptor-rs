@@ -1,6 +1,6 @@
 ![Crates.io](https://img.shields.io/crates/v/disruptor)
 ![Crates.io](https://img.shields.io/crates/d/disruptor)
-![Build](https://github.com/nicholassm/disruptor-rs/actions/workflows/rust.yml/badge.svg)
+![Build](https://github.com/nicholassm/disruptor-rs/actions/workflows/build_and_test.yml/badge.svg)
 
 # Disruptor
 

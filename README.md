@@ -1,6 +1,7 @@
 ![Crates.io](https://img.shields.io/crates/v/disruptor)
 ![Crates.io](https://img.shields.io/crates/d/disruptor)
 ![Build](https://github.com/nicholassm/disruptor-rs/actions/workflows/build_and_test.yml/badge.svg)
+[![codecov](https://codecov.io/gh/nicholassm/disruptor-rs/graph/badge.svg?token=VW03K0AMI0)](https://codecov.io/gh/nicholassm/disruptor-rs)
 
 # Disruptor
 

@@ -23,7 +23,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: llvm-cov
-          args: --offline --all-features --lcov --output-path lcov.info
+          args: --all-features --lcov --output-path lcov.info
         env:
           TRYBUILD: overwrite
       - name: codecov.io

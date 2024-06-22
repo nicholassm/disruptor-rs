@@ -271,7 +271,7 @@ mod tests {
 				s.send(e.num).expect("Should be able to send.");
 			}
 		};
-		let mut producer = build_single_producer(4, factory(), BusySpin)
+		let mut producer = build_single_producer(4, factory(), BusySpinWithSpinLoopHint)
 			.handle_events_with(processor)
 			.build();
 
@@ -354,6 +354,10 @@ mod tests {
 		let mut i = 0;
 		for _ in 0..3 {
 			producer.batch_publish(3, |iter| {
+				// We are guaranteed that the iterator will yield three elements:
+				assert_eq!((3, Some(3)), iter.size_hint());
+
+				// Publish.
 				for e in iter {
 					e.num = i*i;
 					i    += 1;
@@ -544,92 +548,126 @@ mod tests {
 	}
 
 	#[test]
-	fn spmc_with_dependent_consumers() {
+	fn spmc_with_dependent_consumers_and_some_with_state() {
 		let (s, r) = mpsc::channel();
 
 		let processor1 = {
 			let s = s.clone();
-			move |e: &Event, _, _| { s.send(e.num + 1).unwrap(); }
+			move |e: &Event, _, _| { s.send(e.num + 0).unwrap(); }
 		};
 		let processor2 = {
 			let s = s.clone();
-			move |e: &Event, _, _| { s.send(e.num + 2).unwrap(); }
+			move |state: &mut RefCell<i64>, e: &Event, _, _| {
+				*state.borrow_mut() += e.num;
+				s.send(*state.borrow() + 10).unwrap();
+			}
 		};
 		let processor3 = {
-			move |e: &Event, _, _| { s.send(e.num + 3).unwrap(); }
+			let s = s.clone();
+			move |e: &Event, _, _| { s.send(e.num + 2).unwrap(); }
+		};
+		let processor4 = {
+			let s = s.clone();
+			move |state: &mut RefCell<i64>, e: &Event, _, _| {
+				*state.borrow_mut() += e.num;
+				s.send(*state.borrow() + 20).unwrap();
+			}
+		};
+		let processor5 = {
+			let s = s.clone();
+			move |e: &Event, _, _| { s.send(e.num + 4).unwrap(); }
+		};
+		let processor6 = {
+			move |state: &mut RefCell<i64>, e: &Event, _, _| {
+				*state.borrow_mut() += e.num;
+				s.send(*state.borrow() + 30).unwrap();
+			}
 		};
 
 		let builder      = build_single_producer(8, factory(), BusySpin);
 
 		let mut producer = builder
 			.handle_events_with(processor1)
+			.handle_events_and_state_with(processor2, || { RefCell::new(0) })
 			.and_then()
-				.handle_events_with(processor2)
+				.handle_events_with(processor3)
+				.handle_events_and_state_with(processor4, || { RefCell::new(0) })
 				.and_then()
-					.handle_events_with(processor3)
+					.handle_events_with(processor5)
+					.handle_events_and_state_with(processor6, || { RefCell::new(0) })
 			.build();
 
-		producer.publish(|e| { e.num = 0; });
+		producer.publish(|e| { e.num = 1; });
 		drop(producer);
 
-		let result: Vec<i64> = r.iter().collect();
-		assert_eq!(vec![1, 2, 3], result);
+		let mut result: Vec<i64> = r.iter().collect();
+		result.sort();
+		assert_eq!(vec![1, 3, 5, 11, 21, 31], result);
 	}
 
 	#[test]
-	fn mpmc_with_dependent_consumers() {
+	fn mpmc_with_dependent_consumers_and_some_with_state() {
 		let (s, r) = mpsc::channel();
 
 		let processor1 = {
 			let s = s.clone();
-			move |e: &Event, _, _| { s.send(e.num + 1).unwrap(); }
+			move |e: &Event, _, _| { s.send(e.num + 0).unwrap(); }
 		};
 		let processor2 = {
 			let s = s.clone();
-			move |e: &Event, _, _| { s.send(e.num + 2).unwrap(); }
+			move |state: &mut RefCell<i64>, e: &Event, _, _| {
+				*state.borrow_mut() += e.num;
+				s.send(*state.borrow() + 10).unwrap();
+			}
 		};
 		let processor3 = {
 			let s = s.clone();
-			move |e: &Event, _, _| { s.send(e.num + 3).unwrap(); }
+			move |e: &Event, _, _| { s.send(e.num + 2).unwrap(); }
 		};
 		let processor4 = {
 			let s = s.clone();
-			move |e: &Event, _, _| { s.send(e.num + 4).unwrap(); }
+			move |state: &mut RefCell<i64>, e: &Event, _, _| {
+				*state.borrow_mut() += e.num;
+				s.send(*state.borrow() + 20).unwrap();
+			}
 		};
 		let processor5 = {
 			let s = s.clone();
-			move |e: &Event, _, _| { s.send(e.num + 5).unwrap(); }
+			move |e: &Event, _, _| { s.send(e.num + 4).unwrap(); }
 		};
 		let processor6 = {
-			move |e: &Event, _, _| { s.send(e.num + 6).unwrap(); }
+			move |state: &mut RefCell<i64>, e: &Event, _, _| {
+				*state.borrow_mut() += e.num;
+				s.send(*state.borrow() + 30).unwrap();
+			}
 		};
 
 		let builder      = build_multi_producer(8, factory(), BusySpin);
 		let mut producer1 = builder
 			.handle_events_with(processor1)
-			.handle_events_with(processor2)
+			.handle_events_and_state_with(processor2, || { RefCell::new(0) })
 			.and_then()
 				.handle_events_with(processor3)
-				.handle_events_with(processor4)
+				.handle_events_and_state_with(processor4, || { RefCell::new(0) })
 				.and_then()
 					.handle_events_with(processor5)
-					.handle_events_with(processor6)
+					.handle_events_and_state_with(processor6, || { RefCell::new(0) })
 			.build();
 
 		let mut producer2 = producer1.clone();
 
 		thread::scope(|s| {
 			s.spawn(move || {
-				producer1.publish(|e| e.num = 0);
+				producer1.publish(|e| e.num = 1);
 			});
 
 			s.spawn(move || {
-				producer2.publish(|e| e.num = 10);
+				producer2.publish(|e| e.num = 1);
 			});
 		});
 
 		let mut result: Vec<i64> = r.iter().collect();
 		result.sort();
-		assert_eq!(vec![1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16], result);
+		assert_eq!(vec![1, 1, 3, 3, 5, 5, 11, 12, 21, 22, 31, 32], result);
 	}
 }

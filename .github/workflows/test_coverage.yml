@@ -26,7 +26,9 @@ jobs:
           args: --all-features --lcov --output-path lcov.info
         env:
           TRYBUILD: overwrite
-      - name: codecov.io
-        uses: codecov/codecov-action@v3
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true

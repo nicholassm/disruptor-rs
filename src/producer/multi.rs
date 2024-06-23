@@ -107,8 +107,8 @@ impl<E, C> Drop for MultiProducer<E, C> {
 		let mut shared = self.shared_producer.lock().unwrap();
 		let old_count  = shared.counter.fetch_sub(1, Ordering::AcqRel);
 		if old_count == 1 {
-			// Next is the sequence that all consumers are waiting to read.
-			let sequence = self.producer_barrier.next();
+			// All consumers are waiting to read the next sequence.
+			let sequence = self.producer_barrier.current() + 1;
 			self.shutdown_at_sequence.store(sequence, Ordering::Relaxed);
 			shared.consumers.iter_mut().for_each(|c| { c.join(); });
 		}
@@ -307,11 +307,6 @@ impl Barrier for MultiProducerBarrier {
 }
 
 impl ProducerBarrier for MultiProducerBarrier {
-	#[inline]
-	fn next(&self) -> Sequence {
-		self.cursor.next()
-	}
-
 	#[inline]
 	fn publish(&self, sequence: Sequence) {
 		let availability      = self.get_availability(sequence);

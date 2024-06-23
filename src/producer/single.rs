@@ -188,11 +188,6 @@ impl Barrier for SingleProducerBarrier {
 
 impl ProducerBarrier for SingleProducerBarrier {
 	#[inline]
-	fn next(&self) -> Sequence {
-		self.cursor.next()
-	}
-
-	#[inline]
 	fn publish(&self, sequence: Sequence) {
 		self.cursor.store(sequence);
 	}

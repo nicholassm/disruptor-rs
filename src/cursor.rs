@@ -20,11 +20,6 @@ impl Cursor {
 	}
 
 	#[inline]
-	pub(crate) fn next(&self) -> Sequence {
-		self.counter.fetch_add(1, Ordering::AcqRel) + 1
-	}
-
-	#[inline]
 	pub(crate) fn store(&self, sequence: Sequence) {
 		self.counter.store(sequence, Ordering::Release);
 	}
@@ -43,8 +38,10 @@ mod tests {
 	fn cursor_operations() {
 		let cursor = Cursor::new(-1);
 
-		assert_eq!(cursor.next(), 0);
-		assert_eq!(cursor.next(), 1);
+		assert_eq!(cursor.compare_exchange(-1, 0).ok().unwrap(), -1);
+		assert_eq!(cursor.compare_exchange( 0, 1).ok().unwrap(),  0);
+		// Simulate other thread having updated the cursor.
+		assert_eq!(cursor.compare_exchange( 0, 1).err().unwrap(), 1);
 
 		cursor.store(100);
 		assert_eq!(cursor.relaxed_value(), 100);

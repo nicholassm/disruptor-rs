@@ -425,6 +425,29 @@ mod tests {
 		assert_eq!(result, [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]);
 	}
 
+	#[cfg_attr(miri, ignore)]
+	#[test]
+	fn spsc_disruptor_with_pined_and_named_thread() {
+		let (s, r)    = mpsc::channel();
+		let processor = move |e: &Event, _, _| {
+			s.send(e.num).expect("Should be able to send.");
+		};
+		let mut producer = build_single_producer(8, factory(), BusySpin)
+			.pined_at_core(0).thread_named("my-processor").handle_events_with(processor)
+			.build();
+
+		thread::scope(|s| {
+			s.spawn(move || {
+				for i in 0..10 {
+					producer.publish(|e| e.num = i*i );
+				}
+			});
+		});
+
+		let result: Vec<_> = r.iter().collect();
+		assert_eq!(result, [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]);
+	}
+
 	#[test]
 	fn spsc_disruptor_with_batch_publication() {
 		let (s, r)    = mpsc::channel();

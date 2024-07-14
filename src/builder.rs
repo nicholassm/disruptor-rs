@@ -114,12 +114,12 @@ where
 ///# let processor2 = |e: &Event, _, _| {};
 ///# let processor3 = |e: &Event, _, _| {};
 /// let mut producer = build_single_producer(8, factory, BusySpin)
-///    // Processor 1 is pined and has a custom name.
-///    .pined_at_core(1).thread_named("my_processor").handle_events_with(processor1)
-///    // Processor 2 is not pined and gets a generic name.
+///    // Processor 1 is pinned and has a custom name.
+///    .pin_at_core(1).thread_name("my_processor").handle_events_with(processor1)
+///    // Processor 2 is not pinned and gets a generic name.
 ///    .handle_events_with(processor2)
-///    // Processor 3 is pined and gets a generic name.
-///    .pined_at_core(2).handle_events_with(processor3)
+///    // Processor 3 is pinned and gets a generic name.
+///    .pin_at_core(2).handle_events_with(processor3)
 ///    .build();
 ///# }
 /// ```
@@ -129,13 +129,13 @@ pub trait ProcessorSettings<E, W>: Sized {
 
 	/// Pin processor thread on the core with `id` for the next added event handler.
 	/// Outputs an error on stderr if the thread could not be pinned.
-	fn pined_at_core(mut self, id: usize) -> Self {
-		self.shared().pined_at_core(id);
+	fn pin_at_core(mut self, id: usize) -> Self {
+		self.shared().pin_at_core(id);
 		self
 	}
 
 	/// Set a name for the processor thread for the next added event handler.
-	fn thread_named(mut self, name: &'static str) -> Self {
+	fn thread_name(mut self, name: &'static str) -> Self {
 		self.shared().thread_named(name);
 		self
 	}
@@ -203,7 +203,7 @@ impl <E, W> Shared<E, W> {
 		self.current_consumer_cursors.as_mut().unwrap().push(cursor);
 	}
 
-	fn pined_at_core(&mut self, id: usize) {
+	fn pin_at_core(&mut self, id: usize) {
 		cpu_has_core_else_panic(id);
 		self.thread_context.affinity = Some(CoreId { id } );
 	}

@@ -14,7 +14,7 @@ It's heavily inspired by the brilliant
 
 Add the following to your `Cargo.toml` file:
 
-    disruptor = "2.2.0"
+    disruptor = "3.0.0"
 
 To read details of how to use the library, check out the documentation on [docs.rs/disruptor](https://docs.rs/disruptor).
 

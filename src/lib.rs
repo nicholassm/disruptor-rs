@@ -110,7 +110,7 @@
 //! }
 //! ```
 //!
-//! ###  Multiple Producers and Multiple, Pined Consumers:
+//! ###  Multiple Producers and Multiple, Pinned Consumers:
 //! ```
 //! use disruptor::*;
 //! use std::thread;
@@ -139,11 +139,11 @@
 //!
 //!     let mut producer1 = disruptor::build_multi_producer(64, factory, BusySpin)
 //!         // `h2` handles events concurrently with `h1`.
-//!         .pined_at_core(1).handle_events_with(h1)
-//!         .pined_at_core(2).handle_events_with(h2)
+//!         .pin_at_core(1).handle_events_with(h1)
+//!         .pin_at_core(2).handle_events_with(h2)
 //!             .and_then()
 //!             // `h3` handles events after `h1` and `h2`.
-//!             .pined_at_core(3).handle_events_with(h3)
+//!             .pin_at_core(3).handle_events_with(h3)
 //!         .build();
 //!
 //!     // Create another producer.
@@ -427,13 +427,13 @@ mod tests {
 
 	#[cfg_attr(miri, ignore)]
 	#[test]
-	fn spsc_disruptor_with_pined_and_named_thread() {
+	fn spsc_disruptor_with_pinned_and_named_thread() {
 		let (s, r)    = mpsc::channel();
 		let processor = move |e: &Event, _, _| {
 			s.send(e.num).expect("Should be able to send.");
 		};
 		let mut producer = build_single_producer(8, factory(), BusySpin)
-			.pined_at_core(0).thread_named("my-processor").handle_events_with(processor)
+			.pin_at_core(0).thread_name("my-processor").handle_events_with(processor)
 			.build();
 
 		thread::scope(|s| {

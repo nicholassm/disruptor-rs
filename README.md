@@ -87,11 +87,11 @@ fn main() {
 
     let mut producer1 = disruptor::build_multi_producer(64, factory, BusySpin)
         // `h2` handles events concurrently with `h1`.
-        .pined_at_core(1).handle_events_with(h1)
-        .pined_at_core(2).handle_events_with(h2)
+        .pin_at_core(1).handle_events_with(h1)
+        .pin_at_core(2).handle_events_with(h2)
             .and_then()
             // `h3` handles events after `h1` and `h2`.
-            .pined_at_core(3).handle_events_with(h3)
+            .pin_at_core(3).handle_events_with(h3)
         .build();
 
     // Create another producer.

@@ -50,7 +50,7 @@ fn main() {
     }
 
     // Publish a batch of events into the Disruptor.
-    producer.publish_batch(5, |iter| {
+    producer.batch_publish(5, |iter| {
         for e in iter { // `iter` is guaranteed to yield 5 events.
             e.price = 42.0;
         }

@@ -1,19 +1,26 @@
+//! Module for structs for building a Single Producer Disruptor in a type safe way.
+//!
+//! To get started building a Single Producer Disruptor, invoke [super::build_multi_producer].
+
 use std::sync::Arc;
 
 use crate::{barrier::Barrier, consumer::{MultiConsumerBarrier, SingleConsumerBarrier}, producer::single::{SingleProducer, SingleProducerBarrier}, wait_strategies::WaitStrategy, builder::ProcessorSettings, Sequence};
 
 use super::{Builder, Shared};
 
+/// First step in building a Disruptor with a [SingleProducer].
 pub struct SPBuilder<E, W, B> {
 	shared:            Shared<E, W>,
 	producer_barrier:  Arc<SingleProducerBarrier>,
 	dependent_barrier: Arc<B>,
 }
 
+/// Struct for building a Disruptor with a [SingleProducer] and one consumer.
 pub struct SPSCBuilder<E, W, B> {
 	parent: SPBuilder<E, W, B>,
 }
 
+/// Struct for building a Disruptor with a [SingleProducer] and many consumers.
 pub struct SPMCBuilder<E, W, B> {
 	parent: SPBuilder<E, W, B>,
 }

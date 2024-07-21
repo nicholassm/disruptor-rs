@@ -217,13 +217,13 @@
 pub type Sequence = i64;
 
 pub mod wait_strategies;
+pub mod builder;
 mod affinity;
 mod barrier;
 mod consumer;
 mod cursor;
 mod ringbuffer;
 mod producer;
-mod builder;
 
 pub use crate::builder::{build_single_producer, build_multi_producer, ProcessorSettings};
 pub use crate::producer::{Producer, RingBufferFull, MissingFreeSlots};

@@ -1,19 +1,26 @@
+//! Module for structs for building a Multi Producer Disruptor in a type safe way.
+//!
+//! To get started building a Multi Producer Disruptor, invoke [super::build_multi_producer].
+
 use std::sync::Arc;
 
 use crate::{barrier::Barrier, consumer::{MultiConsumerBarrier, SingleConsumerBarrier}, producer::multi::{MultiProducer, MultiProducerBarrier}, wait_strategies::WaitStrategy, builder::ProcessorSettings, Sequence};
 
 use super::{Builder, Shared};
 
+/// First step in building a Disruptor with a [MultiProducer].
 pub struct MPBuilder<E, W, B> {
 	shared:            Shared<E, W>,
 	producer_barrier:  Arc<MultiProducerBarrier>,
 	dependent_barrier: Arc<B>,
 }
 
+/// Struct for building a Disruptor with a [MultiProducer] and one consumer.
 pub struct MPSCBuilder<E, W, B> {
 	parent: MPBuilder<E, W, B>
 }
 
+/// Struct for building a Disruptor with a [MultiProducer] and many consumers.
 pub struct MPMCBuilder<E, W, B> {
 	parent: MPBuilder<E, W, B>
 }

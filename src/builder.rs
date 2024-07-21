@@ -1,4 +1,6 @@
 //! Module for building the Disruptor and adding event handlers.
+//!
+//! Use [build_single_producer] or [build_multi_producer] to get started.
 
 use std::{sync::{atomic::{fence, AtomicI64, Ordering}, Arc}, thread};
 use core_affinity::CoreId;

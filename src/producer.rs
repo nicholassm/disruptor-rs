@@ -97,6 +97,12 @@ impl<'a, E> Iterator for MutBatchIter<'a, E> {
 /// application before panicking.)
 /// This could also be the case for a [`MissingFreeSlots`] error but not necessarily. That depends on
 /// the application.
+///
+/// Note also, that there is a (very high) limit to how many events can be published into the Disruptor: 2^63 - 1.
+/// It is the client code's responsibility to ensure this limit it never breached as it will result in undefined
+/// behaviour. (There is no guard in the library against breaching the limit due to performance considerations.)
+/// The limit can be avoided by e.g. dropping the Disruptor and creating a new if you have a use case where you can
+/// actually reach the limit in practice.
 pub trait Producer<E> {
 	/// Publish an Event into the Disruptor.
 	/// Returns a `Result` with the published sequence number or a [RingBufferFull] in case the

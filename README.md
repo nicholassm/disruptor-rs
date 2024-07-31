@@ -10,6 +10,16 @@ This library is a low latency, inter-thread communication library written in Rus
 It's heavily inspired by the brilliant
 [Disruptor library from LMAX](https://github.com/LMAX-Exchange/disruptor).
 
+# Contents
+
+- [Getting Started](#getting-started)
+- [Features](#features)
+- [Design Choices](#design-choices)
+- [Performance](#performance)
+- [Related Work](#related-work)
+- [Contributions](#contributions)
+- [Roadmap](#roadmap)
+
 # Getting Started
 
 Add the following to your `Cargo.toml` file:

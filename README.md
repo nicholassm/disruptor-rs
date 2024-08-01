@@ -197,7 +197,7 @@ Although the absence of bugs cannot be guaranteed, these approaches have been us
 - Minimal usage of Unsafe blocks.
 - High test coverage.
 - All tests are run on Miri in CI/CD.
-- Verification in TLA+ (see the `verification/` folder).
+- Verification in TLA+ (see the `verification/` folder).
 
 # Performance
 

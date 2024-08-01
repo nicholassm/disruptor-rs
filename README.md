@@ -15,6 +15,7 @@ It's heavily inspired by the brilliant
 - [Getting Started](#getting-started)
 - [Features](#features)
 - [Design Choices](#design-choices)
+- [Correctness](#correctness)
 - [Performance](#performance)
 - [Related Work](#related-work)
 - [Contributions](#contributions)
@@ -187,6 +188,16 @@ As long as you realize that this can add latency, because the struct is allocate
 Hence, there's synchronization happening in the allocator.
 
 There's also no use of dynamic dispatch - everything is monomorphed.
+
+# Correctness
+
+This library needs to use Unsafe to achieve low latency.
+Although the absence of bugs cannot be guaranteed, these approaches have been used to eliminate bugs:
+
+- Minimal usage of Unsafe blocks.
+- High test coverage.
+- All tests are run on Miri in CI/CD.
+- Verification in TLA+ (see the `verification/` folder).
 
 # Performance
 

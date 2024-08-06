@@ -171,6 +171,7 @@ fn main() {
 # Features
 
 - [x] Single Producer Single Consumer (SPSC).
+- [x] Single Producer Multi Consumer (SPMC) with consumer interdependencies.
 - [x] Multi Producer Single Consumer (MPSC).
 - [x] Multi Producer Multi Consumer (MPMC) with consumer interdependencies.
 - [x] Busy-spin wait strategies.

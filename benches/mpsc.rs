@@ -187,7 +187,7 @@ fn crossbeam(group: &mut BenchmarkGroup<WallTime>, params: (i64, u64), param_des
 
 fn disruptor(group: &mut BenchmarkGroup<WallTime>, params: (i64, u64), param_description: &str) {
 	let factory   = || { Event { data: 0 } };
-	// Use an AtomicI64 to "extract" the value from the processing thread.
+	// Use an AtomicI64 to count number of received events.
 	let sink      = Arc::new(AtomicI64::new(0));
 	let processor = {
 		let sink = Arc::clone(&sink);

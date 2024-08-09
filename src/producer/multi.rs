@@ -1,4 +1,4 @@
-use std::{process, sync::{atomic::{fence, AtomicI32, AtomicI64, Ordering}, Arc, Mutex}};
+use std::{process, sync::{atomic::{fence, AtomicI64, AtomicU64, Ordering}, Arc, Mutex}};
 use crossbeam_utils::CachePadded;
 use crate::{barrier::{Barrier, NONE}, consumer::Consumer, producer::ProducerBarrier, ringbuffer::RingBuffer, producer::{Producer, RingBufferFull}, Sequence};
 use crate::cursor::Cursor;
@@ -221,9 +221,8 @@ where
 		let iter   = MutBatchIter::new(lower, upper, &self.ring_buffer);
 		updates(iter);
 		// Make publications available by publishing all the sequences in the interval [lower; upper].
-		for sequence in lower..=upper {
-			self.producer_barrier.publish(sequence);
-		}
+		fence(Ordering::Release);
+		self.producer_barrier.publish_range_relaxed(lower, n);
 		upper
 	}
 }
@@ -232,21 +231,28 @@ where
 #[doc(hidden)]
 pub struct MultiProducerBarrier {
 	cursor:      Cursor,
-	/// For each slot, an `AtomicI32` tracks its availability.
-	/// The value encodes what "round" the event is available in to avoid producers having to
-	/// coordinate directly (with the added overhead).
+	/// AtomicU64s each track availability of 64 slots.
+	/// Each bit in the AtomicU64 encodes whether the slot was published in an even or odd round.
+	/// This way produceres avoid coordinating directly (with the added overhead that would have).
 	/// Note, producers can never "overtake" each other and overwrite the availability of an event
 	/// in the "previous" round as all producers must wait for the consumer furtherst behind (which
 	/// is again blocked by the slowest producer).
-	available:   Box<[CachePadded<AtomicI32>]>,
+	available:   Box<[AtomicU64]>,
 	index_mask:  usize,
 	index_shift: usize,
 }
 
 impl MultiProducerBarrier {
 	pub(crate) fn new(size: usize) -> Self {
+		assert!(size >= 64, "Multi Producer Disruptor must have a size of minimum 64 slots.");
+
 		let cursor      = Cursor::new(-1);
-		let available   = (0..size).map(|_i| { CachePadded::new(AtomicI32::new(-1)) }).collect();
+		let i64_needed  = size/64;
+		// available encodes 1 bit for each slot.
+		// If the bit is 1 it means that the slot was published in the latest even round
+		// and 0 means latest odd round. A ring buffer starts with round 0 (an even round)
+		// so that is why we initialize with 0.
+		let available   = (0..i64_needed).map(|_i| { AtomicU64::new(0) }).collect();
 		let index_mask  = size - 1;
 		let index_shift = Self::log2(size);
 
@@ -267,41 +273,101 @@ impl MultiProducerBarrier {
 		self.cursor.compare_exchange(current, next)
 	}
 
+	/// Returns the availability index and the bit index of the given sequence number.
 	#[inline]
-	fn calculate_availability_index(&self, sequence: Sequence) -> usize {
+	fn calculate_availability_index(&self, sequence: Sequence) -> (usize, usize) {
+		let slot_index         = self.slot_index(sequence);
+		let availability_index = slot_index/64;
+		let bit_index          = slot_index - availability_index*64;
+		(availability_index, bit_index)
+	}
+
+	#[inline]
+	fn slot_index(&self, sequence: Sequence) -> usize {
 		sequence as usize & self.index_mask
 	}
 
+	/// Calculates if we're in an even (1) or odd (0) round.
 	#[inline]
-	fn calculate_availability_flag(&self, sequence: Sequence) -> i32 {
-		(sequence >> self.index_shift) as i32
+	fn calculate_availability_flag(&self, sequence: Sequence) -> u64 {
+		let round = (sequence >> self.index_shift) as u64;
+		(round + 1)%2
 	}
 
 	#[inline]
-	fn get_availability(&self, sequence: Sequence) -> &AtomicI32 {
-		let availability_index = self.calculate_availability_index(sequence);
-		unsafe {
-			self.available.get_unchecked(availability_index)
+	fn publish_range_relaxed(&self, from: Sequence, n: i64) {
+		let (mut availability_index, mut bit_index) = self.calculate_availability_index(from);
+		let mut flip_mask                           = 0_u64;
+		let mut availability                        = unsafe { self.available.get_unchecked(availability_index) };
+
+		for i in 0..n {
+			// Encode which bits need to be flipped in the next bit field, counting bit_index upwards while < 64.
+			flip_mask |= 1 << bit_index;
+
+			if bit_index < 63 { // We shift max 63 places.
+				bit_index += 1;
+			}
+			else {
+				// Commit flip mask so far to current bit field.
+				availability.fetch_xor(flip_mask, Ordering::Relaxed);
+				// Load next bit field and reset flip_mask.
+				let next_sequence               = from + i + 1;
+				(availability_index, bit_index) = self.calculate_availability_index(next_sequence);
+				debug_assert!(bit_index == 0, "bit_index must be 0 because a new bit field was loaded.");
+				availability                    = unsafe { self.available.get_unchecked(availability_index) };
+				flip_mask                       = 0;
+			}
+		}
+		// If there's any remaining - commit them to the last bit field.
+		if flip_mask > 0 {
+			availability.fetch_xor(flip_mask, Ordering::Relaxed);
 		}
 	}
 
 	#[inline]
-	fn is_published(&self, sequence: Sequence) -> bool {
-		let availability      = self.get_availability(sequence);
-		let availability_flag = self.calculate_availability_flag(sequence);
-		availability.load(Ordering::Relaxed) == availability_flag
+	fn publish_with_ordering(&self, sequence: Sequence, ordering: Ordering) {
+		let (availability_index, bit_index) = self.calculate_availability_index(sequence);
+		let availability                    = unsafe { self.available.get_unchecked(availability_index) };
+		let mask                            = 1 << bit_index;
+		// XOR operation will flip the bit on exactly the bit_index position - encoding that we have
+		// published an event in an even or odd round.
+		availability.fetch_xor(mask, ordering);
 	}
 }
 
 impl Barrier for MultiProducerBarrier {
 	#[inline]
-	fn get_after(&self, lower_bound: Sequence) -> Sequence {
-		let mut highest_available = lower_bound;
+	fn get_after(&self, prev: Sequence) -> Sequence {
+		let mut availability_flag                   = self.calculate_availability_flag(prev);
+		let (mut availability_index, mut bit_index) = self.calculate_availability_index(prev);
+		let mut availability                        = unsafe { self.available.get_unchecked(availability_index).load(Ordering::Relaxed) };
+		// Shift bits to first relevant bit.
+		availability                                = availability >> bit_index;
+		let mut highest_available                   = prev;
+
 		loop {
-			if ! self.is_published(highest_available) {
+			if availability & 1 != availability_flag {
 				return highest_available - 1;
 			}
 			highest_available += 1;
+
+			// Prepare for checking the next bit.
+			if bit_index < 63 { // We shift max 63 places.
+				bit_index     += 1;
+				availability >>= 1;
+			}
+			else {
+				// Load next bit field.
+				(availability_index, bit_index) = self.calculate_availability_index(highest_available);
+				debug_assert!(bit_index == 0, "bit_index must be 0 because a new bit field was loaded.");
+				availability                    = unsafe { self.available.get_unchecked(availability_index).load(Ordering::Relaxed) };
+
+				if availability_index == 0 {
+					// If we wrapped then we're now looking for the flipped bit.
+					// (I.e. from odd to even or from even to odd.)
+					availability_flag ^= 1;
+				}
+			}
 		}
 	}
 }
@@ -309,9 +375,7 @@ impl Barrier for MultiProducerBarrier {
 impl ProducerBarrier for MultiProducerBarrier {
 	#[inline]
 	fn publish(&self, sequence: Sequence) {
-		let availability      = self.get_availability(sequence);
-		let availability_flag = self.calculate_availability_flag(sequence);
-		availability.store(availability_flag, Ordering::Release);
+		self.publish_with_ordering(sequence, Ordering::Release);
 	}
 }
 

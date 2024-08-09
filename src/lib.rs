@@ -302,13 +302,13 @@ mod tests {
 				s.send(e.num).expect("Should be able to send.");
 			}
 		};
-		let mut producer1 = build_multi_producer(4, factory(), BusySpinWithSpinLoopHint)
+		let mut producer1 = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint)
 			.handle_events_with(processor)
 			.build();
 
 		let mut producer2 = producer1.clone();
 
-		for i in 0..4 {
+		for i in 0..64 {
 			producer1.try_publish(|e| e.num = i).expect("Should publish");
 		}
 
@@ -318,13 +318,13 @@ mod tests {
 		assert_eq!(RingBufferFull, producer2.try_publish(|e| e.num = 4).err().unwrap());
 		// Until the processor continues reading events.
 		barrier.store(false, Relaxed);
-		producer1.publish(|e| e.num = 4);
-		producer2.publish(|e| e.num = 5);
+		producer1.publish(|e| e.num = 64);
+		producer2.publish(|e| e.num = 65);
 
 		drop(producer1);
 		drop(producer2);
 		let result: Vec<_> = r.iter().collect();
-		assert_eq!(result, [0, 1, 2, 3, 4, 5]);
+		assert_eq!(result, (0..=65).into_iter().collect::<Vec<i64>>());
 	}
 
 	#[test]
@@ -371,12 +371,12 @@ mod tests {
 				s.send(e.num).expect("Should be able to send.");
 			}
 		};
-		let mut producer1 = build_multi_producer(8, factory(), BusySpin)
+		let mut producer1 = build_multi_producer(64, factory(), BusySpin)
 			.handle_events_with(processor)
 			.build();
 		let mut producer2 = producer1.clone();
 
-		for i in 0..2 {
+		for i in 0..58 {
 			producer1.publish(|e| e.num = i);
 		}
 		assert_eq!(MissingFreeSlots(2),   producer1.try_batch_publish(  8, |_iter| {} ).err().unwrap());
@@ -400,7 +400,15 @@ mod tests {
 		drop(producer2);
 		let mut result: Vec<_> = r.iter().collect();
 		result.sort();
-		assert_eq!(result, [0, 1, 2, 2, 3, 3]);
+		// Initial events published.
+		let mut expected = (0..58).into_iter().collect::<Vec<i64>>();
+		// Now add the two successfull batch publications.
+		expected.push(2);
+		expected.push(2);
+		expected.push(3);
+		expected.push(3);
+		expected.sort();
+		assert_eq!(result, expected);
 	}
 
 	#[test]
@@ -555,7 +563,7 @@ mod tests {
 			s.send(e.num).expect("Should be able to send.");
 		};
 
-		let mut producer1 = build_multi_producer(8, factory(), BusySpinWithSpinLoopHint)
+		let mut producer1 = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint)
 			.handle_events_with(processor)
 			.build();
 		let mut producer2 = producer1.clone();
@@ -590,7 +598,7 @@ mod tests {
 			s.send(e.num).expect("Should be able to send.");
 		};
 
-		let mut producer1 = build_multi_producer(8, factory(), BusySpin)
+		let mut producer1 = build_multi_producer(64, factory(), BusySpin)
 			.handle_events_with(processor)
 			.build();
 		let mut producer2 = producer1.clone();
@@ -749,7 +757,7 @@ mod tests {
 			}
 		};
 
-		let builder      = build_multi_producer(8, factory(), BusySpin);
+		let builder      = build_multi_producer(64, factory(), BusySpin);
 		let mut producer1 = builder
 			.handle_events_with(processor1)
 			.handle_events_and_state_with(processor2, || { RefCell::new(0) })

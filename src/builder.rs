@@ -73,7 +73,7 @@ where
 ///# let processor1 = |e: &Event, _, _| {};
 ///# let processor2 = |e: &Event, _, _| {};
 ///# let processor3 = |e: &Event, _, _| {};
-/// let mut producer1 = build_multi_producer(8, factory, BusySpin)
+/// let mut producer1 = build_multi_producer(64, factory, BusySpin)
 ///    .handle_events_with(processor1)
 ///    .handle_events_with(processor2)
 ///    .and_then()

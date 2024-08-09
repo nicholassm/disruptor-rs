@@ -320,12 +320,57 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn test_log2() {
+	fn log2() {
 		assert_eq!(1, MultiProducerBarrier::log2(2));
 		assert_eq!(1, MultiProducerBarrier::log2(3));
 		assert_eq!(3, MultiProducerBarrier::log2(8));
 		assert_eq!(3, MultiProducerBarrier::log2(9));
 		assert_eq!(3, MultiProducerBarrier::log2(10));
 		assert_eq!(3, MultiProducerBarrier::log2(11));
+	}
+
+	#[test]
+	fn publication_of_single_event_for_small_barrier() {
+		let barrier = MultiProducerBarrier::new(64);
+
+		barrier.publish_range_relaxed(0, 1);
+		// Verify published:
+		assert_eq!(barrier.get_after(0), 0);
+	}
+
+	#[test]
+	fn publication_of_range_for_small_barrier() {
+		let barrier = MultiProducerBarrier::new(64);
+
+		barrier.publish_range_relaxed(0, 10);
+		// Verify published:
+		assert_eq!(barrier.get_after(0), 9);
+	}
+
+	#[test]
+	fn publication_of_range_wrapping_ringbuffer_for_small_barrier() {
+		let barrier = MultiProducerBarrier::new(64);
+
+		barrier.publish_range_relaxed(0, 50);
+		// Verify published:
+		assert_eq!(barrier.get_after(0), 49);
+
+		barrier.publish_range_relaxed(50, 50);
+		// Verify published:
+		assert_eq!(barrier.get_after(49), 99);
+	}
+
+	#[test]
+	fn publication_of_range_wrapping_ringbuffer_for_barrier() {
+		let barrier = MultiProducerBarrier::new(128);
+
+		barrier.publish_range_relaxed(0, 100);
+		// Verify published:
+		assert_eq!(barrier.get_after(0), 99);
+		// Verify not published:
+
+		barrier.publish_range_relaxed(100, 100);
+		// Verify published:
+		assert_eq!(barrier.get_after(99), 199);
 	}
 }

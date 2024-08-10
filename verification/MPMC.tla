@@ -52,7 +52,7 @@ TypeInvariant ==
   /\ Buffer!TypeInvariant
   /\ next_sequence    \in Nat
   /\ claimed_sequence \in [ Writers                -> Int                 ]
-  /\ published        \in [ 0..Size                -> Int                 ]
+  /\ published        \in [ 0..Size                -> { TRUE, FALSE }     ]
   /\ read             \in [ Readers                -> Int                 ]
   /\ consumed         \in [ Readers                -> Seq(Nat)            ]
   /\ pc               \in [ Writers \union Readers -> { Access, Advance } ]
@@ -61,10 +61,12 @@ Init ==
   /\ Buffer!Init
   /\ next_sequence    = 0
   /\ claimed_sequence = [ w \in Writers                |-> -1     ]
-  /\ published        = [ i \in 0..Size                |-> -1     ]
+  /\ published        = [ i \in 0..Size                |-> FALSE  ]
   /\ read             = [ r \in Readers                |-> -1     ]
   /\ consumed         = [ r \in Readers                |-> << >>  ]
   /\ pc               = [ a \in Writers \union Readers |-> Access ]
+
+Xor(A, B) == A = ~B
 
 Range(f) ==
   { f[x] : x \in DOMAIN(f) }
@@ -72,13 +74,26 @@ Range(f) ==
 MinReadSequence ==
   CHOOSE min \in Range(read) : \A r \in Readers : min <= read[r]
 
+(***************************************************************************)
+(* Encode whether an index is published by tracking if the slot was        *)
+(* published in an even or odd index. This works because publishers        *)
+(* cannot overtake consumers.                                              *)
+(***************************************************************************)
 IsPublished(sequence) ==
-  LET index == Buffer!IndexOf(sequence)
-  IN  published[index] = sequence
+  LET
+    index   == Buffer!IndexOf(sequence)
+    \* Round number starts at 0.
+    round   == sequence \div Size
+    is_even == round % 2 = 0
+  IN
+    \* published[index] is true if published in an even round otherwise false
+    \* as it was published in an odd round number.
+    published[index] = is_even
 
 Publish(sequence) ==
   LET index == Buffer!IndexOf(sequence)
-  IN  published' = [ published EXCEPT ![index] = sequence ]
+  \* Flip whether we're at an even or odd round.
+  IN  published' = [ published EXCEPT ![index] = Xor(TRUE, @) ]
 
 (***************************************************************************)
 (* Publisher Actions:                                                      *)

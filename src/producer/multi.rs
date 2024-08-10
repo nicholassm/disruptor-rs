@@ -276,7 +276,7 @@ impl MultiProducerBarrier {
 
 	/// Returns the availability index and the bit index of the given sequence number.
 	#[inline]
-	fn calculate_availability_index(&self, sequence: Sequence) -> (usize, usize) {
+	fn calculate_availability_indices(&self, sequence: Sequence) -> (usize, usize) {
 		let slot_index         = self.slot_index(sequence);
 		let availability_index = slot_index >> 6; // == divide by 64.
 		let bit_index          = slot_index - availability_index*64;
@@ -303,12 +303,12 @@ impl MultiProducerBarrier {
 
 	#[inline]
 	fn publish_range_relaxed(&self, from: Sequence, n: i64) {
-		let (mut availability_index, mut bit_index) = self.calculate_availability_index(from);
+		let (mut availability_index, mut bit_index) = self.calculate_availability_indices(from);
 		let mut flip_mask                           = 0_u64;
 		let mut availability                        = self.availability_at(availability_index);
 
 		for i in 0..n {
-			// Encode which bits need to be flipped in the next bit field, counting bit_index upwards while < 64.
+			// Encode which bits need to be flipped in the next bit field, counting bit_index upwards while < 63.
 			flip_mask |= 1 << bit_index;
 
 			if bit_index < 63 { // We shift max 63 places.
@@ -318,11 +318,11 @@ impl MultiProducerBarrier {
 				// Commit flip mask so far to current bit field.
 				availability.fetch_xor(flip_mask, Ordering::Relaxed);
 				// Load next bit field and reset flip_mask.
-				let next_sequence               = from + i + 1;
-				(availability_index, bit_index) = self.calculate_availability_index(next_sequence);
-				debug_assert!(bit_index == 0, "bit_index must be 0 because a new bit field was loaded.");
-				availability                    = self.availability_at(availability_index);
-				flip_mask                       = 0;
+				let next_sequence       = from + i + 1;
+				(availability_index, _) = self.calculate_availability_indices(next_sequence);
+				availability            = self.availability_at(availability_index);
+				bit_index               = 0;
+				flip_mask               = 0;
 			}
 		}
 		// If there's any remaining - commit them to the last bit field.
@@ -333,7 +333,7 @@ impl MultiProducerBarrier {
 
 	#[inline]
 	fn publish_with_ordering(&self, sequence: Sequence, ordering: Ordering) {
-		let (availability_index, bit_index) = self.calculate_availability_index(sequence);
+		let (availability_index, bit_index) = self.calculate_availability_indices(sequence);
 		let availability                    = self.availability_at(availability_index);
 		let mask                            = 1 << bit_index;
 		// XOR operation will flip the bit on exactly the bit_index position - encoding that we have
@@ -346,10 +346,10 @@ impl Barrier for MultiProducerBarrier {
 	#[inline]
 	fn get_after(&self, prev: Sequence) -> Sequence {
 		let mut availability_flag                   = self.calculate_availability_flag(prev);
-		let (mut availability_index, mut bit_index) = self.calculate_availability_index(prev);
+		let (mut availability_index, mut bit_index) = self.calculate_availability_indices(prev);
 		let mut availability                        = self.availability_at(availability_index).load(Ordering::Relaxed);
 		// Shift bits to first relevant bit.
-		availability                                = availability >> bit_index;
+		availability                              >>= bit_index;
 		let mut highest_available                   = prev;
 
 		loop {
@@ -365,9 +365,9 @@ impl Barrier for MultiProducerBarrier {
 			}
 			else {
 				// Load next bit field.
-				(availability_index, bit_index) = self.calculate_availability_index(highest_available);
-				debug_assert!(bit_index == 0, "bit_index must be 0 because a new bit field was loaded.");
-				availability                    = self.availability_at(availability_index).load(Ordering::Relaxed);
+				(availability_index, _) = self.calculate_availability_indices(highest_available);
+				availability            = self.availability_at(availability_index).load(Ordering::Relaxed);
+				bit_index               = 0;
 
 				if availability_index == 0 {
 					// If we wrapped then we're now looking for the flipped bit.

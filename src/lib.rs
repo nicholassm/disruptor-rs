@@ -786,6 +786,7 @@ mod tests {
 		assert_eq!(vec![1, 1, 3, 3, 5, 5, 11, 12, 21, 22, 31, 32], result);
 	}
 
+	#[cfg_attr(miri, ignore)]
 	#[test]
 	fn stress_test() {
 		#[derive(Debug)]

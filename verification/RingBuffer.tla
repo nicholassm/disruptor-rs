@@ -25,13 +25,7 @@ VARIABLE ringbuffer
 
 LastIndex == Size - 1
 
-TypeInvariant ==
-  ringbuffer \in [
-    slots:   UNION { [0 .. LastIndex -> Int \union { NULL }] },
-    readers: UNION { [0 .. LastIndex -> SUBSET(Readers)    ] },
-    writers: UNION { [0 .. LastIndex -> SUBSET(Writers)    ] }
-  ]
-
+(* Initial state of RingBuffer. *)
 Init ==
   ringbuffer = [
     slots   |-> [i \in 0 .. LastIndex |-> NULL ],
@@ -46,6 +40,7 @@ IndexOf(sequence) ==
 (***************************************************************************)
 (* Write operations.                                                       *)
 (***************************************************************************)
+
 Write(index, writer, value) ==
   ringbuffer' = [
     ringbuffer EXCEPT
@@ -59,6 +54,7 @@ EndWrite(index, writer) ==
 (***************************************************************************)
 (*  Read operations.                                                       *)
 (***************************************************************************)
+
 BeginRead(index, reader) ==
   ringbuffer' = [ ringbuffer EXCEPT !.readers[index] = @ \union { reader } ]
 
@@ -68,7 +64,16 @@ Read(index) ==
 EndRead(index, reader) ==
   ringbuffer' = [ ringbuffer EXCEPT !.readers[index] = @ \ { reader } ]
 
------------------------------------------------------------------------------
+(***************************************************************************)
+(* Invariants.                                                             *)
+(***************************************************************************)
+
+TypeOk ==
+  ringbuffer \in [
+    slots:   UNION { [0 .. LastIndex -> Int \union { NULL }] },
+    readers: UNION { [0 .. LastIndex -> SUBSET(Readers)    ] },
+    writers: UNION { [0 .. LastIndex -> SUBSET(Writers)    ] }
+  ]
 
 NoDataRaces ==
   \A i \in 0 .. LastIndex :

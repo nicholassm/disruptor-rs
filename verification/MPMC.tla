@@ -39,32 +39,14 @@ vars == <<
 (* 1. Accessing a slot in the Disruptor or                                 *)
 (* 2. Advancing to the next slot.                                          *)
 (***************************************************************************)
-Access       == "Access"
-Advance      == "Advance"
+Access  == "Access"
+Advance == "Advance"
 
 Transition(t, from, to) ==
   /\ pc[t] = from
   /\ pc'   = [ pc EXCEPT ![t] = to ]
 
-Buffer       == INSTANCE RingBuffer
-
-TypeInvariant ==
-  /\ Buffer!TypeInvariant
-  /\ next_sequence    \in Nat
-  /\ claimed_sequence \in [ Writers                -> Int                 ]
-  /\ published        \in [ 0..Size                -> { TRUE, FALSE }     ]
-  /\ read             \in [ Readers                -> Int                 ]
-  /\ consumed         \in [ Readers                -> Seq(Nat)            ]
-  /\ pc               \in [ Writers \union Readers -> { Access, Advance } ]
-
-Init ==
-  /\ Buffer!Init
-  /\ next_sequence    = 0
-  /\ claimed_sequence = [ w \in Writers                |-> -1     ]
-  /\ published        = [ i \in 0..Size                |-> FALSE  ]
-  /\ read             = [ r \in Readers                |-> -1     ]
-  /\ consumed         = [ r \in Readers                |-> << >>  ]
-  /\ pc               = [ a \in Writers \union Readers |-> Access ]
+Buffer == INSTANCE RingBuffer
 
 Xor(A, B) == A = ~B
 
@@ -99,7 +81,7 @@ Publish(sequence) ==
 (* Publisher Actions:                                                      *)
 (***************************************************************************)
 
-BeginWrite ==
+BeginWrite(writer) ==
   LET
     seq      == next_sequence
     index    == Buffer!IndexOf(seq)
@@ -108,73 +90,94 @@ BeginWrite ==
     \* Are we clear of all consumers? (Potentially a full cycle behind).
     /\ min_read >= seq - Size
     /\ seq < MaxPublished
-    /\ \E w \in Writers :
-      /\ claimed_sequence' = [ claimed_sequence EXCEPT ![w] = seq ]
-      /\ next_sequence'    = seq + 1
-      /\ Transition(w, Access, Advance)
-      /\ Buffer!Write(index, w, seq)
+    /\ claimed_sequence' = [ claimed_sequence EXCEPT ![writer] = seq ]
+    /\ next_sequence'    = seq + 1
+    /\ Transition(writer, Access, Advance)
+    /\ Buffer!Write(index, writer, seq)
     /\ UNCHANGED << consumed, published, read >>
 
-EndWrite ==
-  /\ \E w \in Writers :
-    LET
-      seq   == claimed_sequence[w]
-      index == Buffer!IndexOf(seq)
-    IN
-      /\ Transition(w, Advance, Access)
-      /\ Buffer!EndWrite(index, w)
-      /\ Publish(seq)
-  /\ UNCHANGED << claimed_sequence, next_sequence, consumed, read >>
+EndWrite(writer) ==
+  LET
+    seq   == claimed_sequence[writer]
+    index == Buffer!IndexOf(seq)
+  IN
+    /\ Transition(writer, Advance, Access)
+    /\ Buffer!EndWrite(index, writer)
+    /\ Publish(seq)
+    /\ UNCHANGED << claimed_sequence, next_sequence, consumed, read >>
 
 (***************************************************************************)
 (* Consumer Actions:                                                       *)
 (***************************************************************************)
 
-BeginRead ==
-  /\ \E r \in Readers :
-    LET
-      next  == read[r] + 1
-      index == Buffer!IndexOf(next)
-    IN
-      /\ IsPublished(next)
-      /\ Transition(r, Access, Advance)
-      /\ Buffer!BeginRead(index, r)
-      \* Track what we read from the ringbuffer.
-      /\ consumed' = [ consumed EXCEPT ![r] = Append(@, Buffer!Read(index)) ]
-  /\ UNCHANGED << claimed_sequence, next_sequence, published, read >>
+BeginRead(reader) ==
+  LET
+    next  == read[reader] + 1
+    index == Buffer!IndexOf(next)
+  IN
+    /\ IsPublished(next)
+    /\ Transition(reader, Access, Advance)
+    /\ Buffer!BeginRead(index, reader)
+    \* Track what we read from the ringbuffer.
+    /\ consumed' = [ consumed EXCEPT ![reader] = Append(@, Buffer!Read(index)) ]
+    /\ UNCHANGED << claimed_sequence, next_sequence, published, read >>
 
-EndRead ==
-  /\ \E r \in Readers :
-    LET
-      next  == read[r] + 1
-      index == Buffer!IndexOf(next)
-    IN
-      /\ Transition(r, Advance, Access)
-      /\ Buffer!EndRead(index, r)
-      /\ read' = [ read EXCEPT ![r] = next ]
-  /\ UNCHANGED << claimed_sequence, next_sequence, consumed, published >>
+EndRead(reader) ==
+  LET
+    next  == read[reader] + 1
+    index == Buffer!IndexOf(next)
+  IN
+    /\ Transition(reader, Advance, Access)
+    /\ Buffer!EndRead(index, reader)
+    /\ read' = [ read EXCEPT ![reader] = next ]
+    /\ UNCHANGED << claimed_sequence, next_sequence, consumed, published >>
 
 (***************************************************************************)
 (* Spec:                                                                   *)
 (***************************************************************************)
 
+Init ==
+  /\ Buffer!Init
+  /\ next_sequence    = 0
+  /\ claimed_sequence = [ w \in Writers                |-> -1     ]
+  /\ published        = [ i \in 0..Size                |-> FALSE  ]
+  /\ read             = [ r \in Readers                |-> -1     ]
+  /\ consumed         = [ r \in Readers                |-> << >>  ]
+  /\ pc               = [ a \in Writers \union Readers |-> Access ]
+
 Next ==
-  \/ BeginWrite
-  \/ EndWrite
-  \/ BeginRead
-  \/ EndRead
+  \/ \E w \in Writers : BeginWrite(w)
+  \/ \E w \in Writers : EndWrite(w)
+  \/ \E r \in Readers : BeginRead(r)
+  \/ \E r \in Readers : EndRead(r)
+
+Fairness ==
+  /\ \A w \in Writers : WF_vars(BeginWrite(w))
+  /\ \A w \in Writers : WF_vars(EndWrite(w))
+  /\ \A r \in Readers : WF_vars(BeginRead(r))
+  /\ \A r \in Readers : WF_vars(EndRead(r))
 
 Spec ==
-  /\ Init
-  /\ [][Next]_vars
-  /\ WF_vars(BeginWrite)
-  /\ WF_vars(EndWrite)
-  /\ WF_vars(BeginRead)
-  /\ WF_vars(EndRead)
+  Init /\ [][Next]_vars /\ Fairness
 
------------------------------------------------------------------------------
+(***************************************************************************)
+(* Invariants:                                                             *)
+(***************************************************************************)
 
 NoDataRaces == Buffer!NoDataRaces
+
+TypeOk ==
+  /\ Buffer!TypeOk
+  /\ next_sequence    \in Nat
+  /\ claimed_sequence \in [ Writers                -> Int                 ]
+  /\ published        \in [ 0..Size                -> { TRUE, FALSE }     ]
+  /\ read             \in [ Readers                -> Int                 ]
+  /\ consumed         \in [ Readers                -> Seq(Nat)            ]
+  /\ pc               \in [ Writers \union Readers -> { Access, Advance } ]
+
+(***************************************************************************)
+(* Properties:                                                             *)
+(***************************************************************************)
 
 Liveliness ==
   <>[] (\A r \in Readers : consumed[r] = [i \in 1..MaxPublished |-> i - 1])

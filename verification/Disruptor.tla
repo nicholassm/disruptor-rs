@@ -47,20 +47,6 @@ Transition(t, from, to) ==
 
 Buffer  == INSTANCE RingBuffer
 
-TypeInvariant ==
-  /\ Buffer!TypeInvariant
-  /\ published \in Int
-  /\ read      \in [ Readers                -> Int                 ]
-  /\ consumed  \in [ Readers                -> Seq(Nat)            ]
-  /\ pc        \in [ Writers \union Readers -> { Access, Advance } ]
-
-Init ==
-  /\ Buffer!Init
-  /\ published = -1
-  /\ read      = [ r \in Readers                |-> -1     ]
-  /\ consumed  = [ r \in Readers                |-> << >>  ]
-  /\ pc        = [ a \in Writers \union Readers |-> Access ]
-
 Range(f) ==
   { f[x] : x \in DOMAIN(f) }
 
@@ -71,7 +57,7 @@ MinReadSequence ==
 (* Publisher Actions:                                                      *)
 (***************************************************************************)
 
-BeginWrite ==
+BeginWrite(writer) ==
   LET
     next     == published + 1
     index    == Buffer!IndexOf(next)
@@ -80,71 +66,88 @@ BeginWrite ==
     \* Are we clear of all consumers? (Potentially a full cycle behind).
     /\ min_read >= next - Size
     /\ next < MaxPublished
-    /\ \E w \in Writers :
-      /\ Transition(w, Access, Advance)
-      /\ Buffer!Write(index, w, next)
+    /\ Transition(writer, Access, Advance)
+    /\ Buffer!Write(index, writer, next)
     /\ UNCHANGED << consumed, published, read >>
 
-EndWrite ==
+EndWrite(writer) ==
   LET
     next  == published + 1
     index == Buffer!IndexOf(next)
   IN
-    /\ \E w \in Writers :
-      /\ Transition(w, Advance, Access)
-      /\ Buffer!EndWrite(index, w)
-      /\ published' = next
+    /\ Transition(writer, Advance, Access)
+    /\ Buffer!EndWrite(index, writer)
+    /\ published' = next
     /\ UNCHANGED << consumed, read >>
 
 (***************************************************************************)
 (* Consumer Actions:                                                       *)
 (***************************************************************************)
 
-BeginRead ==
-  /\ \E r \in Readers :
-    LET
-      next  == read[r] + 1
-      index == Buffer!IndexOf(next)
-    IN
-      /\ published >= next
-      /\ Transition(r, Access, Advance)
-      /\ Buffer!BeginRead(index, r)
-      \* Track what we read from the ringbuffer.
-      /\ consumed' = [ consumed EXCEPT ![r] = Append(@, Buffer!Read(index)) ]
-  /\ UNCHANGED << published, read >>
+BeginRead(reader) ==
+  LET
+    next  == read[reader] + 1
+    index == Buffer!IndexOf(next)
+  IN
+    /\ published >= next
+    /\ Transition(reader, Access, Advance)
+    /\ Buffer!BeginRead(index, reader)
+    \* Track what we read from the ringbuffer.
+    /\ consumed' = [ consumed EXCEPT ![reader] = Append(@, Buffer!Read(index)) ]
+    /\ UNCHANGED << published, read >>
 
-EndRead ==
-  /\ \E r \in Readers :
-    LET
-      next  == read[r] + 1
-      index == Buffer!IndexOf(next)
-    IN
-      /\ Transition(r, Advance, Access)
-      /\ Buffer!EndRead(index, r)
-      /\ read' = [ read EXCEPT ![r] = next ]
-  /\ UNCHANGED << consumed, published >>
+EndRead(reader) ==
+  LET
+    next  == read[reader] + 1
+    index == Buffer!IndexOf(next)
+  IN
+    /\ Transition(reader, Advance, Access)
+    /\ Buffer!EndRead(index, reader)
+    /\ read' = [ read EXCEPT ![reader] = next ]
+    /\ UNCHANGED << consumed, published >>
 
 (***************************************************************************)
 (* Spec:                                                                   *)
 (***************************************************************************)
 
+Init ==
+  /\ Buffer!Init
+  /\ published = -1
+  /\ read      = [ r \in Readers                |-> -1     ]
+  /\ consumed  = [ r \in Readers                |-> << >>  ]
+  /\ pc        = [ a \in Writers \union Readers |-> Access ]
+
 Next ==
-  \/ BeginWrite
-  \/ EndWrite
-  \/ BeginRead
-  \/ EndRead
+  \/ \E w \in Writers : BeginWrite(w)
+  \/ \E w \in Writers : EndWrite(w)
+  \/ \E r \in Readers : BeginRead(r)
+  \/ \E r \in Readers : EndRead(r)
+
+Fairness ==
+  /\ \A w \in Writers : WF_vars(BeginWrite(w))
+  /\ \A w \in Writers : WF_vars(EndWrite(w))
+  /\ \A r \in Readers : WF_vars(BeginRead(r))
+  /\ \A r \in Readers : WF_vars(EndRead(r))
 
 Spec ==
-  /\ Init
-  /\ [][Next]_vars
-  /\ WF_vars(BeginWrite)
-  /\ WF_vars(EndWrite)
-  /\ WF_vars(BeginRead)
-  /\ WF_vars(EndRead)
+  Init /\ [][Next]_vars /\ Fairness
 
------------------------------------------------------------------------------
+(***************************************************************************)
+(* Invariants:                                                             *)
+(***************************************************************************)
+
+TypeOk ==
+  /\ Buffer!TypeOk
+  /\ published \in Int
+  /\ read      \in [ Readers                -> Int                 ]
+  /\ consumed  \in [ Readers                -> Seq(Nat)            ]
+  /\ pc        \in [ Writers \union Readers -> { Access, Advance } ]
 
 NoDataRaces == Buffer!NoDataRaces
+
+(***************************************************************************)
+(* Properties:                                                             *)
+(***************************************************************************)
 
 Liveliness ==
   <>[] (\A r \in Readers : consumed[r] = [i \in 1..MaxPublished |-> i - 1])

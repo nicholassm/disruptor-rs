@@ -94,11 +94,11 @@ where
 					let event_ptr    = ring_buffer.get(sequence);
 					let event        = unsafe { & *event_ptr };
 					event_handler(event, sequence, end_of_batch);
-					// Signal to producers or later consumers that we're done processing `sequence`.
-					consumer_cursor.store(sequence);
 					// Update next sequence to read.
 					sequence += 1;
 				}
+				// Signal to producers or later consumers that we're done processing `sequence - 1`.
+				consumer_cursor.store(sequence - 1);
 			}
 		}).expect("Should spawn thread.")
 	};
@@ -140,11 +140,11 @@ where
 					let event_ptr    = ring_buffer.get(sequence);
 					let event        = unsafe { & *event_ptr };
 					event_handler(&mut state, event, sequence, end_of_batch);
-					// Signal to producers or later consumers that we're done processing `sequence`.
-					consumer_cursor.store(sequence);
 					// Update next sequence to read.
 					sequence += 1;
 				}
+				// Signal to producers or later consumers that we're done processing `sequence - 1`.
+				consumer_cursor.store(sequence - 1);
 			}
 		}).expect("Should spawn thread.")
 	};

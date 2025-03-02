@@ -17,6 +17,13 @@ use self::{multi::MPBuilder, single::SPBuilder};
 pub mod single;
 pub mod multi;
 
+/// State: No consumers (yet).
+pub struct NC;
+/// State: Single consumer.
+pub struct SC;
+/// State: Multiple consumers.
+pub struct MC;
+
 /// Build a single producer Disruptor. Use this if you only need to publish events from one thread.
 ///
 /// For using a producer see [Producer](crate::producer::Producer).
@@ -45,7 +52,7 @@ pub mod multi;
 /// // Now use the `producer` to publish events.
 /// ```
 pub fn build_single_producer<E, W, F>(size: usize, event_factory: F, wait_strategy: W)
--> SPBuilder<E, W, SingleProducerBarrier>
+-> SPBuilder<NC, E, W, SingleProducerBarrier>
 where
 	F: FnMut() -> E,
 	E: 'static + Send + Sync,
@@ -86,7 +93,7 @@ where
 /// // Now two threads can get a Producer each.
 /// ```
 pub fn build_multi_producer<E, W, F>(size: usize, event_factory: F, wait_strategy: W)
--> MPBuilder<E, W, MultiProducerBarrier>
+-> MPBuilder<NC, E, W, MultiProducerBarrier>
 where
 	F: FnMut() -> E,
 	E: 'static + Send + Sync,

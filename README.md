@@ -13,6 +13,7 @@ It's heavily inspired by the brilliant
 # Contents
 
 - [Getting Started](#getting-started)
+- [Patterns](#patterns)
 - [Features](#features)
 - [Design Choices](#design-choices)
 - [Correctness](#correctness)
@@ -167,6 +168,76 @@ fn main() {
     }
 }
 ```
+
+# Patterns
+
+## A Disruptor with Different Event Types
+
+Let's assume you have multiple different types of producers that each publish distinct events.
+It could be an exchange where you receive e.g. client logins, logouts, orders, etc.
+
+You can model this by using an enum as event type:
+
+```rust
+enum Event {
+    Login{id: i32},
+    Logout{id: i32},
+    Order{user_id: i32, price: f64, quantity: i32},
+    Heartbeat,
+}
+```
+
+Then you can differentiate on different event types in your processor:
+
+```rust
+fn main() {
+    let factory = || { Event::Heartbeat };
+
+    let processor = |e: &Event, _sequence: Sequence, _end_of_batch: bool| {
+        match e {
+            Event::Login{id}                       => { /* Register client login.    */ }
+            Event::Logout{id}                      => { /* Register client logout.   */ }
+            Event::Order{user_id, price, quantity} => { /* Add an order to the CLOB. */ }
+            Event::Heartbeat                       => { /* Heartbeat from somewhere. */ }
+        }
+    };
+
+    let mut producer = disruptor::build_multi_producer(64, factory, BusySpin)
+        .handle_events_with(processor)
+        .build();
+
+    let mut login_producer  = producer.clone();
+    let mut logout_producer = producer.clone();
+    let mut order_producer  = producer.clone();
+
+    login_producer.publish( |e| *e = Event::Login{id: 1});
+    order_producer.publish( |e| *e = Event::Order{user_id: 1, price: 100.0, quantity: 10});
+    logout_producer.publish(|e| *e = Event::Logout{id: 1});
+    producer.publish(       |e| *e = Event::Heartbeat);
+}
+```
+
+## Splitting Workload Across Processors
+
+Let's assume you have a high ingress rate of events and you need to split the work across multiple processors
+to cope with the load. You can do that by assigning an `id` to each processor and then only process events
+with a sequence number that modulo the number of processors equal the `id`.
+Here, for simplicity, we split it across two processors:
+
+```rust
+let processor0 = |e: &Event, sequence: Sequence, _end_of_batch: bool| {
+    if sequence % 2 == 0 {
+        // Process event.
+    }
+}
+let processor1 = |e: &Event, sequence: Sequence, _end_of_batch: bool| {
+    if sequence % 2 == 1 {
+        // Process event.
+    }
+}
+```
+
+This scheme ensures each event is processed once.
 
 # Features
 

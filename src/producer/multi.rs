@@ -110,7 +110,7 @@ impl<E, C> Drop for MultiProducer<E, C> {
 			// All consumers are waiting to read the next sequence.
 			let sequence = self.producer_barrier.current() + 1;
 			self.shutdown_at_sequence.store(sequence, Ordering::Relaxed);
-			shared.consumers.iter_mut().for_each(|c| { c.join(); });
+			shared.consumers.iter_mut().for_each(|c| c.join());
 		}
 	}
 }

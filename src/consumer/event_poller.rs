@@ -59,14 +59,14 @@ pub enum Polling {
 /// It can be used as an iterator to read the published events and the dropping of the `EventGuard`
 /// will signal to the `Disruptor` that the reading is completed. This will allow other consumers or
 /// producers to advance.
-pub struct EventGuard<'a, E, B> {
-	parent:    &'a mut EventPoller<E, B>,
+pub struct EventGuard<'p, E, B> {
+	parent:    &'p mut EventPoller<E, B>,
 	sequence:  Sequence,
 	available: Sequence,
 }
 
-impl<'a, 'e, E, B> Iterator for &'e mut EventGuard<'a, E, B> {
-	type Item = &'e E;
+impl<'p, 'g, E, B> Iterator for &'g mut EventGuard<'p, E, B> {
+	type Item = &'g E;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.sequence > self.available {

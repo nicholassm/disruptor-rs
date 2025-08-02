@@ -35,7 +35,7 @@ To read details of how to use the library, check out the documentation on [docs.
 There are two ways to process events:
 
 1. Supply a closure to the Disruptor and let it manage the processing thread(s).
-2. Use an `EventPoller` API where you can poll for events (and manage your own threads).
+2. Use the `EventPoller` API where you can poll for events (and manage your own threads).
 
 ## Single and Batch Publication With Managed Threads
 

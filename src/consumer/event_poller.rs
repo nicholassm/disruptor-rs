@@ -55,9 +55,10 @@ pub enum Polling {
 	Shutdown,
 }
 
-/// Guards the available events that can be processed.
+/// Guards the available events that can be processed when using the EventPoller API.
 /// It can be used as an iterator to read the published events and the dropping of the `EventGuard`
-/// will signal to the `Disruptor` that the reading is completed.
+/// will signal to the `Disruptor` that the reading is completed. This will allow other consumers or
+/// producers to advance.
 pub struct EventGuard<'a, E, B> {
 	parent:    &'a mut EventPoller<E, B>,
 	sequence:  Sequence,
@@ -81,6 +82,7 @@ impl<'a, E, B> Iterator for EventGuard<'a, E, B> {
 }
 
 impl<E, B> ExactSizeIterator for EventGuard<'_, E, B> {
+	/// Returns the number of events available to read.
 	fn len(&self) -> usize {
 		(self.available - self.sequence + 1) as usize
 	}

@@ -29,5 +29,9 @@ name = "mpsc"
 harness = false
 
 [[bench]]
+name = "poller"
+harness = false
+
+[[bench]]
 name = "counters"
 harness = false

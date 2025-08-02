@@ -39,7 +39,7 @@
 //!
 //! # Examples
 //!
-//! ### Basic Usage:
+//! ### Basic Usage
 //!
 //! ```
 //! use disruptor::*;
@@ -112,7 +112,7 @@
 //! }
 //! ```
 //!
-//! ###  Multiple Producers and Multiple, Pinned Consumers:
+//! ###  Multiple Producers and Multiple, Pinned Consumers
 //! ```
 //! use disruptor::*;
 //! use std::thread;
@@ -173,7 +173,7 @@
 //!  // as well.
 //! ```
 //!
-//! ### Adding Custom State That is Neither `Send` Nor `Sync`:
+//! ### Adding Custom State That is Neither `Send` Nor `Sync`
 //!
 //! ```
 //! use std::{cell::RefCell, rc::Rc};
@@ -212,7 +212,7 @@
 //! }
 //! ```
 //!
-//! ### Event Polling API:
+//! ### Event Polling API
 //!
 //! ```
 //! use disruptor::*;

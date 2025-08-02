@@ -17,7 +17,7 @@ use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 ///# }
 ///# let factory = || { Event { price: 0.0 }};
 ///# let mut builder = build_single_producer(8, factory, BusySpin);
-///# let (mut event_poller, mut builder) = builder.event_poller();
+///# let (mut event_poller, builder) = builder.event_poller();
 ///# let mut producer = builder.build();
 ///# producer.publish(|e| { e.price = 42.0; });
 ///# drop(producer);
@@ -33,7 +33,7 @@ use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 ///         },// At this point the EventGuard (here named `events`) is dropped,
 ///           // signaling the Disruptor that the events have been processed.
 ///         Err(PollError::NoEvents) => { /* Do other work or try again. */ },
-///         Err(PollError::Shutdown) => { break; } // Exit the loop if the Disruptor is shut down.
+///         Err(PollError::Shutdown) => { break; }, // Exit the loop if the Disruptor is shut down.
 ///     }
 /// }
 /// ```
@@ -80,13 +80,13 @@ impl<'a, E, B> Iterator for EventGuard<'a, E, B> {
 	}
 }
 
-impl<'a, E, B> ExactSizeIterator for EventGuard<'a, E, B> {
+impl<E, B> ExactSizeIterator for EventGuard<'_, E, B> {
 	fn len(&self) -> usize {
 		(self.available - self.sequence + 1) as usize
 	}
 }
 
-impl<'a, E, B> Drop for EventGuard<'a, E, B> {
+impl<E, B> Drop for EventGuard<'_, E, B> {
 	fn drop(&mut self) {
 		// Signal to producers or later consumers that we're done processing `available` sequence.
 		// Note, not all events in the range have to have been read.

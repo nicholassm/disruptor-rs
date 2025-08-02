@@ -26,9 +26,18 @@ It's heavily inspired by the brilliant
 
 Add the following to your `Cargo.toml` file:
 
-    disruptor = "3.4.0"
+    disruptor = "3.5.0"
 
 To read details of how to use the library, check out the documentation on [docs.rs/disruptor](https://docs.rs/disruptor).
+
+## Processing Events
+
+There are two ways to process events:
+
+1. Supply a closure to the Disruptor and let it manage the processing thread(s).
+2. Use an `EventPoller` API where you can poll for events (and manage your own threads).
+
+## Single and Batch Publication With Managed Threads
 
 Here's a minimal example demonstrating both single and batch publication. Note, batch publication should be used whenever possible for best latency and throughput (see benchmarks below).
 
@@ -71,6 +80,8 @@ fn main() {
  // processor is done handling all events then the Disruptor is dropped
  // as well.
 ```
+
+## Pinning Threads and Dependencies Between Processors
 
 The library also supports pinning threads on cores to avoid latency induced by context switching.
 A more advanced usage demonstrating this and with multiple producers and multiple interdependent consumers could look like this:
@@ -131,6 +142,8 @@ fn main() {
  // as well.
 ```
 
+## Processors with State
+
 If you need to store some state in the processor thread which is neither `Send` nor `Sync`, e.g. a `Rc<RefCell<i32>>`, then you can create a closure for initializing that state and pass it along with the processing closure when you build the Disruptor. The Disruptor will then pass a mutable reference to your state on each event. As an example:
 
 ```rust
@@ -165,6 +178,56 @@ fn main() {
         producer.publish(|e| {
             e.price = i as f64;
         });
+    }
+}
+```
+
+## Event Polling
+
+An alternative to storing state in the processor is to use the Event Poller API:
+
+```rust
+use disruptor::*;
+
+// The event on the ring buffer.
+struct Event {
+    price: f64
+}
+
+fn main() {
+    // Factory closure for initializing events in the Ring Buffer.
+    let factory = || { Event { price: 0.0 }};
+
+    let size = 64;
+    let builder = disruptor::build_single_producer(size, factory, BusySpin);
+    let (mut poller, builder) = builder.event_poller();
+    let mut producer = builder.build();
+
+    // Publish single events into the Disruptor via the `Producer` handle.
+    for i in 0..10 {
+        producer.publish(|e| {
+            e.price = i as f64;
+        });
+    }
+
+    loop {
+        match poller.poll() {
+            Ok(mut events) => {
+                // `events` implements ExactSizeIterator so events can be
+                // batch processed and handled with e.g. a for loop.
+                for event in events {
+                    // Process events here.
+                }
+            },// When guard (here named `events`) goes out of scope,
+             // it signals to the Disruptor that reading is done.
+            Err(PollError::NoEvents) => {
+                // Do other work or poll again.
+            },
+            Err(PollError::Shutdown) => {
+                // Disruptor is shut down so no more events will be published.
+                break;
+            },
+        }
     }
 }
 ```
@@ -248,6 +311,7 @@ This scheme ensures each event is processed once.
 - [x] Busy-spin wait strategies.
 - [x] Batch publication of events.
 - [x] Batch consumption of events.
+- [x] Event Poller API.
 - [x] Thread affinity can be set for the event processor thread(s).
 - [x] Set thread name of each event processor thread.
 

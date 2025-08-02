@@ -5,7 +5,7 @@
 use std::sync::{atomic::AtomicI64, Arc};
 use core_affinity::CoreId;
 use crossbeam_utils::CachePadded;
-use crate::{affinity::cpu_has_core_else_panic, barrier::{Barrier, NONE}, consumer::{start_processor, start_processor_with_state}, Sequence};
+use crate::{affinity::cpu_has_core_else_panic, barrier::{Barrier, NONE}, consumer::{start_processor, start_processor_with_state, event_poller::EventPoller}, Sequence};
 use crate::consumer::Consumer;
 use crate::cursor::Cursor;
 use crate::producer::{single::SingleProducerBarrier, multi::MultiProducerBarrier};
@@ -162,7 +162,19 @@ where
 	{
 		let barrier            = self.dependent_barrier();
 		let (cursor, consumer) = start_processor(event_handler, self.shared(), barrier);
-		self.shared().add_consumer(consumer, cursor);
+		self.shared().add_consumer_and_cursor(consumer, cursor);
+	}
+
+	fn get_event_poller(&mut self) -> EventPoller<E, B> {
+		let cursor = Arc::new(Cursor::new(-1)); // Initially, the consumer has not read slot 0 yet.
+		self.shared().add_cursor(Arc::clone(&cursor));
+
+		EventPoller::new(
+			Arc::clone(&self.shared().ring_buffer),
+			Arc::clone(&self.dependent_barrier()),
+			Arc::clone(&self.shared().shutdown_at_sequence),
+			cursor,
+		)
 	}
 
 	fn add_event_handler_with_state<EH, S, IS>(&mut self, event_handler: EH, initialize_state: IS)
@@ -172,7 +184,7 @@ where
 	{
 		let barrier            = self.dependent_barrier();
 		let (cursor, consumer) = start_processor_with_state(event_handler, self.shared(), barrier, initialize_state);
-		self.shared().add_consumer(consumer, cursor);
+		self.shared().add_consumer_and_cursor(consumer, cursor);
 	}
 
 	fn dependent_barrier(&self) -> Arc<B>;
@@ -207,8 +219,12 @@ impl <E, W> Shared<E, W> {
 		}
 	}
 
-	fn add_consumer(&mut self, consumer: Consumer, cursor: Arc<Cursor>) {
+	fn add_consumer_and_cursor(&mut self, consumer: Consumer, cursor: Arc<Cursor>) {
 		self.consumers.push(consumer);
+		self.add_cursor(cursor);
+	}
+
+	fn add_cursor(&mut self, cursor: Arc<Cursor>) {
 		self.current_consumer_cursors.as_mut().unwrap().push(cursor);
 	}
 

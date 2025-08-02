@@ -3,6 +3,8 @@ use crossbeam_utils::CachePadded;
 
 use crate::{affinity::set_affinity_if_defined, barrier::Barrier, builder::Shared, cursor::Cursor, wait_strategies::WaitStrategy, Sequence};
 
+pub mod event_poller;
+
 #[doc(hidden)]
 pub struct Consumer {
 	join_handle: Option<JoinHandle<()>>,

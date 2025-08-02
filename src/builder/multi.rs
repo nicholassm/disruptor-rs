@@ -4,7 +4,7 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
-use crate::{barrier::Barrier, consumer::{MultiConsumerBarrier, SingleConsumerBarrier}, producer::multi::{MultiProducer, MultiProducerBarrier}, wait_strategies::WaitStrategy, builder::ProcessorSettings, Sequence};
+use crate::{barrier::Barrier, builder::ProcessorSettings, consumer::{event_poller::EventPoller, MultiConsumerBarrier, SingleConsumerBarrier}, producer::multi::{MultiProducer, MultiProducerBarrier}, wait_strategies::WaitStrategy, Sequence};
 
 use super::{Builder, Shared, MC, NC, SC};
 
@@ -52,6 +52,19 @@ where
 		}
 	}
 
+	/// Get an EventPoller.
+	pub fn event_poller(mut self) -> (EventPoller<E, B>, MPBuilder<SC, E, W, B>) {
+		let event_poller = self.get_event_poller();
+
+		(event_poller,
+		MPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		})
+	}
+
 	/// Add an event handler.
 	pub fn handle_events_with<EH>(mut self, event_handler: EH) -> MPBuilder<SC, E, W, B>
 	where
@@ -88,6 +101,19 @@ where
 	W: 'static + WaitStrategy,
 	B: 'static + Barrier,
 {
+	/// Get an EventPoller.
+	pub fn event_poller(mut self) -> (EventPoller<E, B>, MPBuilder<MC, E, W, B>) {
+		let event_poller = self.get_event_poller();
+
+		(event_poller,
+		MPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		})
+	}
+
 	/// Add an event handler.
 	pub fn handle_events_with<EH>(mut self, event_handler: EH) -> MPBuilder<MC, E, W, B>
 	where
@@ -152,6 +178,19 @@ where
 	W: 'static + WaitStrategy,
 	B: 'static + Barrier,
 {
+	/// Get an EventPoller.
+	pub fn event_poller(mut self) -> (EventPoller<E, B>, MPBuilder<MC, E, W, B>) {
+		let event_poller = self.get_event_poller();
+
+		(event_poller,
+		MPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		})
+	}
+
 	/// Add an event handler.
 	pub fn handle_events_with<EH>(mut self, event_handler: EH) -> MPBuilder<MC, E, W, B>
 	where

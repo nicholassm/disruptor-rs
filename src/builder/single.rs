@@ -4,7 +4,7 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
-use crate::{barrier::Barrier, consumer::{MultiConsumerBarrier, SingleConsumerBarrier}, producer::single::{SingleProducer, SingleProducerBarrier}, wait_strategies::WaitStrategy, builder::ProcessorSettings, Sequence};
+use crate::{barrier::Barrier, builder::ProcessorSettings, consumer::{event_poller::EventPoller, MultiConsumerBarrier, SingleConsumerBarrier}, producer::single::{SingleProducer, SingleProducerBarrier}, wait_strategies::WaitStrategy, Sequence};
 
 use super::{Builder, Shared, MC, NC, SC};
 
@@ -50,6 +50,19 @@ where
 			producer_barrier,
 			dependent_barrier,
 		}
+	}
+
+	/// Get an EventPoller.
+	pub fn event_poller(mut self) -> (EventPoller<E, B>, SPBuilder<SC, E, W, B>) {
+		let event_poller = self.get_event_poller();
+
+		(event_poller,
+		SPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		})
 	}
 
 	/// Add an event handler.
@@ -99,6 +112,19 @@ where
 			self.producer_barrier,
 			self.shared.consumers,
 		consumer_barrier)
+	}
+
+	/// Get an EventPoller.
+	pub fn event_poller(mut self) -> (EventPoller<E, B>, SPBuilder<MC, E, W, B>) {
+		let event_poller = self.get_event_poller();
+
+		(event_poller,
+		SPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		})
 	}
 
 	/// Complete the (concurrent) consumption of events so far and let new consumers process
@@ -152,6 +178,19 @@ where
 	W: 'static + WaitStrategy,
 	B: 'static + Barrier,
 {
+	/// Get an EventPoller.
+	pub fn event_poller(mut self) -> (EventPoller<E, B>, SPBuilder<MC, E, W, B>) {
+		let event_poller = self.get_event_poller();
+
+		(event_poller,
+		SPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		})
+	}
+
 	/// Add an event handler.
 	pub fn handle_events_with<EH>(mut self, event_handler: EH) -> SPBuilder<MC, E, W, B>
 	where

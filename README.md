@@ -37,6 +37,8 @@ There are two ways to process events:
 1. Supply a closure to the Disruptor and let it manage the processing thread(s).
 2. Use the `EventPoller` API where you can poll for events (and manage your own threads).
 
+Both have comparable performance so use what fits your use case best. (See also benchmarks.)
+
 ## Single and Batch Publication With Managed Threads
 
 Here's a minimal example demonstrating both single and batch publication. Note, batch publication should be used whenever possible for best latency and throughput (see benchmarks below).

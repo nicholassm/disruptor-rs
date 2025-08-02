@@ -73,7 +73,7 @@ impl<'a, E, B> Iterator for EventGuard<'a, E, B> {
 			return None;
 		}
 
-		// SAFETY: The Guard is authorized to read up to `available` sequence.
+		// SAFETY: The Guard is authorized to read up to and including `available` sequence.
 		let event_ptr = self.parent.ring_buffer.get(self.sequence);
 		let event     = unsafe { &*event_ptr };
 		self.sequence += 1;

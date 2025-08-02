@@ -65,7 +65,12 @@ pub struct EventGuard<'p, E, B> {
 	available: Sequence,
 }
 
-impl<'p, 'g, E, B> Iterator for &'g mut EventGuard<'p, E, B> {
+/// The Iterator is implemented for the `&mut EventGuard` to bind the returned
+/// events' lifetime to the lifetime (`'g`) of the `EventGuard`.
+/// (And not the lifetime of the `EventPoller`. The latter would be catastrophic because a client
+/// could hold on to a reference to a en Event after the drop method was run for the
+/// `EventGuard` and a publisher could write to the immutable reference - UB.)
+impl<'g, E, B> Iterator for &'g mut EventGuard<'_, E, B> {
 	type Item = &'g E;
 
 	fn next(&mut self) -> Option<Self::Item> {

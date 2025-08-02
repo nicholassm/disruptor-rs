@@ -215,13 +215,13 @@ fn main() {
     loop {
         match poller.poll() {
             Ok(mut events) => {
-                // `events` implements ExactSizeIterator so events can be
+                // `&mut events` implements ExactSizeIterator so events can be
                 // batch processed and handled with e.g. a for loop.
                 for event in &mut events {
                     // Process events here.
                 }
             },// When guard (here named `events`) goes out of scope,
-             // it signals to the Disruptor that reading is done.
+              // it signals to the Disruptor that reading is done.
             Err(Polling::NoEvents) => {
                 // Do other work or poll again.
             },

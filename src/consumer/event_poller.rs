@@ -23,7 +23,7 @@ use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 ///# drop(producer);
 /// loop {
 ///     match event_poller.poll() {
-///         Ok(mut events) => {
+///         Ok(events) => {
 ///             // Batch process events if efficient in your use case.
 ///             let batch_size = events.len();
 ///             // Read events with an iterator.

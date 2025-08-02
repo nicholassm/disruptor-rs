@@ -214,10 +214,10 @@ fn main() {
 
     loop {
         match poller.poll() {
-            Ok(events) => {
+            Ok(mut events) => {
                 // `events` implements ExactSizeIterator so events can be
                 // batch processed and handled with e.g. a for loop.
-                for event in events {
+                for event in &mut events {
                     // Process events here.
                 }
             },// When guard (here named `events`) goes out of scope,

@@ -1,4 +1,4 @@
-use std::sync::{atomic::{fence, AtomicI64, Ordering}, Arc};
+use std::{sync::{atomic::{fence, AtomicI64, Ordering}, Arc}};
 use crossbeam_utils::CachePadded;
 use thiserror::Error;
 use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
@@ -23,11 +23,11 @@ use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 ///# drop(producer);
 /// loop {
 ///     match event_poller.poll() {
-///         Ok(events) => {
+///         Ok(mut events) => {
 ///             // Batch process events if efficient in your use case.
-///             let batch_size = events.len();
+///             let batch_size = (&mut events).len();
 ///             // Read events with an iterator.
-///             for event in events {
+///             for event in &mut events {
 ///                 println!("Processing event: {:?}", event);
 ///             }
 ///         },// At this point the EventGuard (here named `events`) is dropped,
@@ -65,8 +65,8 @@ pub struct EventGuard<'a, E, B> {
 	available: Sequence,
 }
 
-impl<'a, E, B> Iterator for EventGuard<'a, E, B> {
-	type Item = &'a E;
+impl<'a, 'e, E, B> Iterator for &'e mut EventGuard<'a, E, B> {
+	type Item = &'e E;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.sequence > self.available {
@@ -81,7 +81,7 @@ impl<'a, E, B> Iterator for EventGuard<'a, E, B> {
 	}
 }
 
-impl<E, B> ExactSizeIterator for EventGuard<'_, E, B> {
+impl<E, B> ExactSizeIterator for &mut EventGuard<'_, E, B> {
 	/// Returns the number of events available to read.
 	fn len(&self) -> usize {
 		(self.available - self.sequence + 1) as usize

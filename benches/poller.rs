@@ -71,8 +71,8 @@ fn polling(group: &mut BenchmarkGroup<WallTime>, inputs: (i64, u64), param: &str
 		spawn(move || {
 			loop {
 				match poller.poll() {
-					Ok(events) => {
-						for event in events {
+					Ok(mut events) => {
+						for event in &mut events {
 							sink.store(event.data, Ordering::Release);
 						}
 					},

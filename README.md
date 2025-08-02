@@ -220,10 +220,10 @@ fn main() {
                 }
             },// When guard (here named `events`) goes out of scope,
              // it signals to the Disruptor that reading is done.
-            Err(PollError::NoEvents) => {
+            Err(Polling::NoEvents) => {
                 // Do other work or poll again.
             },
-            Err(PollError::Shutdown) => {
+            Err(Polling::Shutdown) => {
                 // Disruptor is shut down so no more events will be published.
                 break;
             },

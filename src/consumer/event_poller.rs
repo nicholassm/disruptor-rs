@@ -16,7 +16,7 @@ use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 ///#     price: f64
 ///# }
 ///# let factory = || { Event { price: 0.0 }};
-///# let mut builder = build_single_producer(8, factory, BusySpin);
+///# let builder = build_single_producer(8, factory, BusySpin);
 ///# let (mut event_poller, builder) = builder.event_poller();
 ///# let mut producer = builder.build();
 ///# producer.publish(|e| { e.price = 42.0; });
@@ -32,8 +32,8 @@ use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 ///             }
 ///         },// At this point the EventGuard (here named `events`) is dropped,
 ///           // signaling the Disruptor that the events have been processed.
-///         Err(PollError::NoEvents) => { /* Do other work or try again. */ },
-///         Err(PollError::Shutdown) => { break; }, // Exit the loop if the Disruptor is shut down.
+///         Err(Polling::NoEvents) => { /* Do other work or try again. */ },
+///         Err(Polling::Shutdown) => { break; }, // Exit the loop if the Disruptor is shut down.
 ///     }
 /// }
 /// ```
@@ -46,7 +46,7 @@ pub struct EventPoller<E, B> {
 
 /// Error types that can occur if polling is unsuccessful.
 #[derive(Debug, Error, PartialEq)]
-pub enum PollError {
+pub enum Polling {
 	/// Indicates that there are no events available to process.
 	#[error("No available events.")]
 	NoEvents,
@@ -115,16 +115,16 @@ where
 
 	/// Returns the next available event or an error if no events are available or the Disruptor is shut down.
 	/// This method does not block; it will return immediately.
-	pub fn poll(&mut self) -> Result<EventGuard<'_, E, B>, PollError> {
+	pub fn poll(&mut self) -> Result<EventGuard<'_, E, B>, Polling> {
 		let sequence = self.cursor.relaxed_value() + 1;
 
 		if sequence == self.shutdown_at_sequence.load(Ordering::Relaxed) {
-			return Err(PollError::Shutdown);
+			return Err(Polling::Shutdown);
 		}
 
 		let available = self.dependent_barrier.get_after(sequence);
 		if available < sequence {
-			return Err(PollError::NoEvents);
+			return Err(Polling::NoEvents);
 		}
 		fence(Ordering::Acquire);
 

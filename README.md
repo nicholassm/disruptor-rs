@@ -320,10 +320,9 @@ This scheme ensures each event is processed once.
 # Design Choices
 
 Everything in the library is about low-latency and this heavily influences all choices made in this library.
-As an example, you cannot allocate an event and *move* that into the ringbuffer. Instead, events are allocated on startup to ensure they are co-located in memory to increase cache coherency.
-However, you can still allocate a struct on the heap and move ownership to a field in the event on the Ringbuffer.
-As long as you realize that this can add latency, because the struct is allocated by one thread and dropped by another.
-Hence, there's synchronization happening in the allocator.
+As an example, you cannot allocate an event and *move* that into the ringbuffer.
+Instead, events are allocated on startup to ensure they are co-located in memory to increase cache coherency.
+However, you can still allocate e.g. a struct and move ownership to a field in the event on the Ringbuffer.
 
 There's also no use of dynamic dispatch - everything is monomorphed.
 

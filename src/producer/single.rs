@@ -160,7 +160,9 @@ where
 impl<E, C> Drop for SingleProducer<E, C> {
 	fn drop(&mut self) {
 		self.shutdown_at_sequence.store(self.sequence, Ordering::Relaxed);
-		self.consumers.iter_mut().for_each(|c| c.join());
+		for consumer in &mut self.consumers {
+			consumer.join();
+		}
 	}
 }
 

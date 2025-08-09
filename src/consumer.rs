@@ -66,55 +66,73 @@ impl Barrier for MultiConsumerBarrier {
 	}
 }
 
-pub(crate) fn start_processor<E, EP, W, B> (
+/// Spawns a thread that runs the given `processor_loop`.
+fn spawn_processor<E, W, F>(
+	builder: &mut Shared<E, W>,
+	processor_loop: F
+) -> JoinHandle<()>
+where
+	E: 'static + Send + Sync,
+	W: 'static + WaitStrategy,
+	F: 'static + Send + FnOnce(),
+{
+	let thread_name    = builder.thread_context.name();
+	let affinity       = builder.thread_context.affinity();
+	let thread_builder = thread::Builder::new().name(thread_name.clone());
+
+	thread_builder.spawn(move || {
+		set_affinity_if_defined(affinity, thread_name.as_str());
+		processor_loop();
+	}).expect("Should spawn thread.")
+}
+
+pub(crate) fn start_processor<E, EP, W, B>(
 	mut event_handler: EP,
 	builder:           &mut Shared<E, W>,
-	barrier:           Arc<B>)
--> (Arc<Cursor>, Consumer)
+	barrier:           Arc<B>
+) -> (Arc<Cursor>, Consumer)
 where
 	E:  'static + Send + Sync,
 	EP: 'static + Send + FnMut(&E, Sequence, bool),
 	W:  'static + WaitStrategy,
 	B:  'static + Barrier + Send + Sync,
 {
-	let consumer_cursor      = Arc::new(Cursor::new(-1));// Initially, the consumer has not read slot 0 yet.
+	let consumer_cursor      = Arc::new(Cursor::new(-1)); // Initially, the consumer has not read slot 0 yet.
 	let wait_strategy        = builder.wait_strategy;
 	let ring_buffer          = Arc::clone(&builder.ring_buffer);
 	let shutdown_at_sequence = Arc::clone(&builder.shutdown_at_sequence);
-	let thread_name          = builder.thread_context.name();
-	let affinity             = builder.thread_context.affinity();
-	let thread_builder       = thread::Builder::new().name(thread_name.clone());
-	let join_handle          = {
+
+	let processor_loop = {
 		let consumer_cursor = Arc::clone(&consumer_cursor);
-		thread_builder.spawn(move || {
-			set_affinity_if_defined(affinity, thread_name.as_str());
+		move || {
 			let mut sequence = 0;
 			while let Some(available) = wait_for_events(sequence, &shutdown_at_sequence, barrier.as_ref(), &wait_strategy) {
-				while available >= sequence { // Potentiel batch processing.
+				// Batch-process events.
+				while available >= sequence {
 					let end_of_batch = available == sequence;
 					// SAFETY: Now, we have (shared) read access to the event at `sequence`.
 					let event_ptr    = ring_buffer.get(sequence);
-					let event        = unsafe { & *event_ptr };
+					let event        = unsafe { &*event_ptr };
 					event_handler(event, sequence, end_of_batch);
-					// Update next sequence to read.
 					sequence += 1;
 				}
 				// Signal to producers or later consumers that we're done processing `sequence - 1`.
 				consumer_cursor.store(sequence - 1);
 			}
-		}).expect("Should spawn thread.")
+		}
 	};
 
-	let consumer = Consumer::new(join_handle);
+	let join_handle = spawn_processor(builder, processor_loop);
+	let consumer    = Consumer::new(join_handle);
 	(consumer_cursor, consumer)
 }
 
-pub(crate) fn start_processor_with_state<E, EP, W, B, S, IS> (
+pub(crate) fn start_processor_with_state<E, EP, W, B, S, IS>(
 	mut event_handler: EP,
 	builder:           &mut Shared<E, W>,
 	barrier:           Arc<B>,
-	initialize_state:  IS)
--> (Arc<Cursor>, Consumer)
+	initialize_state:  IS
+) -> (Arc<Cursor>, Consumer)
 where
 	E:  'static + Send + Sync,
 	IS: 'static + Send + FnOnce() -> S,
@@ -122,36 +140,34 @@ where
 	W:  'static + WaitStrategy,
 	B:  'static + Barrier + Send + Sync,
 {
-	let consumer_cursor      = Arc::new(Cursor::new(-1));// Initially, the consumer has not read slot 0 yet.
+	let consumer_cursor      = Arc::new(Cursor::new(-1)); // Initially, the consumer has not read slot 0 yet.
 	let wait_strategy        = builder.wait_strategy;
 	let ring_buffer          = Arc::clone(&builder.ring_buffer);
 	let shutdown_at_sequence = Arc::clone(&builder.shutdown_at_sequence);
-	let thread_name          = builder.thread_context.name();
-	let affinity             = builder.thread_context.affinity();
-	let thread_builder       = thread::Builder::new().name(thread_name.clone());
-	let join_handle          = {
+
+	let processor_loop = {
 		let consumer_cursor = Arc::clone(&consumer_cursor);
-		thread_builder.spawn(move || {
-			set_affinity_if_defined(affinity, thread_name.as_str());
+		move || {
 			let mut sequence = 0;
 			let mut state    = initialize_state();
-			while let Some(available_sequence) = wait_for_events(sequence, &shutdown_at_sequence, barrier.as_ref(), &wait_strategy) {
-				while available_sequence >= sequence { // Potentiel batch processing.
-					let end_of_batch = available_sequence == sequence;
+			while let Some(available) = wait_for_events(sequence, &shutdown_at_sequence, barrier.as_ref(), &wait_strategy) {
+				// Batch-process events.
+				while available >= sequence {
+					let end_of_batch = available == sequence;
 					// SAFETY: Now, we have (shared) read access to the event at `sequence`.
 					let event_ptr    = ring_buffer.get(sequence);
-					let event        = unsafe { & *event_ptr };
+					let event        = unsafe { &*event_ptr };
 					event_handler(&mut state, event, sequence, end_of_batch);
-					// Update next sequence to read.
 					sequence += 1;
 				}
 				// Signal to producers or later consumers that we're done processing `sequence - 1`.
 				consumer_cursor.store(sequence - 1);
 			}
-		}).expect("Should spawn thread.")
+		}
 	};
 
-	let consumer = Consumer::new(join_handle);
+	let join_handle = spawn_processor(builder, processor_loop);
+	let consumer    = Consumer::new(join_handle);
 	(consumer_cursor, consumer)
 }
 
@@ -161,21 +177,23 @@ fn wait_for_events<B, W>(
 	shutdown_at_sequence: &CachePadded<AtomicI64>,
 	barrier:              &B,
 	wait_strategy:        &W
-)
--> Option<Sequence>
+) -> Option<Sequence>
 where
 	B: Barrier + Send + Sync,
 	W: WaitStrategy,
 {
 	let mut available = barrier.get_after(sequence);
 	while available < sequence {
-		// If publisher(s) are done publishing events we're done when we've seen the last event.
+		// Check for shutdown.
 		if shutdown_at_sequence.load(Ordering::Relaxed) == sequence {
 			return None;
 		}
 		wait_strategy.wait_for(sequence);
 		available = barrier.get_after(sequence);
 	}
+	// After the loop, we have a new `available` sequence.
+	// An acquire fence is needed to synchronize with the producer's release fence.
+	// This ensures that the writes made by the producer are visible to this thread.
 	fence(Ordering::Acquire);
 	Some(available)
 }

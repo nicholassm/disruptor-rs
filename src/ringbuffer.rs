@@ -10,17 +10,13 @@ pub struct RingBuffer<E> {
 	index_mask: i64,
 }
 
-fn is_pow_of_2(num: usize) -> bool {
-	num != 0 && (num & (num - 1) == 0)
-}
-
 impl <E> RingBuffer<E> {
 	pub(crate) fn new<F>(size: usize, mut event_factory: F)
 	-> Self
 	where
 		F: FnMut() -> E
 	{
-		if !is_pow_of_2(size) { panic!("Size must be power of 2.") }
+		if !size.is_power_of_two() { panic!("Size must be power of 2.") }
 
 		let slots: Box<[UnsafeCell<E>]> = (0..size)
 			.map(|_i| UnsafeCell::new(event_factory()) )
@@ -34,14 +30,25 @@ impl <E> RingBuffer<E> {
 	}
 
 	#[inline]
-	fn wrap_point(&self, sequence: Sequence) -> Sequence {
-		sequence - self.size()
-	}
-
-	#[inline]
-	pub(crate) fn free_slots(&self, producer: Sequence, highest_read_by_consumers: Sequence) -> i64 {
-		let wrap_point = self.wrap_point(producer);
-		highest_read_by_consumers - wrap_point
+	pub(crate) fn free_slots(&self, producer_sequence: Sequence, highest_read_by_consumers: Sequence) -> i64 {
+		// The producer is at `producer_sequence`. The slowest consumer is at
+		// `highest_read_by_consumers`.
+		// The number of items in flight is `producer_sequence - highest_read_by_consumers`.
+		// The number of free slots is `size - in_flight`.
+		//
+		// Example: size=8, producer=3, consumer=0.
+		// In flight: 3 - 0 = 3.
+		// Free: 8 - 3 = 5.
+		// Note: `producer_sequence` is the *next* sequence to be written, so sequences 0, 1, 2
+		// are in flight. The item at sequence 0 is available to be overwritten by the producer
+		// when `highest_read_by_consumers` becomes 0.
+		// The number of occupied slots is `producer_sequence - highest_read_by_consumers`.
+		// So, `free_slots` is `self.size() - (producer_sequence - highest_read_by_consumers)`.
+		//
+		// The producer is not allowed to lap the slowest consumer.
+		// `producer_sequence` must not be more than `size` ahead of `highest_read_by_consumers`.
+		// `producer_sequence` - `highest_read_by_consumers` <= `size`.
+		self.size() - (producer_sequence - highest_read_by_consumers)
 	}
 
 	/// Callers must ensure that only a single mutable reference or multiple immutable references
@@ -70,33 +77,33 @@ mod tests {
 		let ring_buffer = RingBuffer::new(8, || { 0 });
 
 		// Round 1:
-		// Publisher has just published 7 and consumer has read 0.
+		// producer_sequence: 7, highest_read_by_consumers: 0
 		assert_eq!(1, ring_buffer.free_slots(7, 0));
-		// Consumer had read 0 and the publisher has just published 8.
+		// producer_sequence: 8, highest_read_by_consumers: 0
 		assert_eq!(0, ring_buffer.free_slots(8, 0));
-		// Producer has published 0 and comsumer read 0.
+		// producer_sequence: 0, highest_read_by_consumers: 0
 		assert_eq!(8, ring_buffer.free_slots(0, 0));
-		// Publisher has just published 3 and consumer is (still) reading 0.
+		// producer_sequence: 3, highest_read_by_consumers: -1 (consumer hasn't read item 0 yet)
 		assert_eq!(4, ring_buffer.free_slots(3, -1));
-		// Publisher has just published 7 and consumer is (still) reading 0.
+		// producer_sequence: 7, highest_read_by_consumers: -1
 		assert_eq!(0, ring_buffer.free_slots(7, -1));
-		// Publisher has just published 7 and consumer has read 0.
+		// producer_sequence: 7, highest_read_by_consumers: 0
 		assert_eq!(1, ring_buffer.free_slots(7, 0));
-		// Publisher has just released 5 and consumer has read 2.
+		// producer_sequence: 5, highest_read_by_consumers: 2
 		assert_eq!(5, ring_buffer.free_slots(5, 2));
-		// Publisher has just released 5 and consumer has read 3.
+		// producer_sequence: 5, highest_read_by_consumers: 3
 		assert_eq!(6, ring_buffer.free_slots(5, 3));
-		// Publisher has just released 5 and consumer has read 4.
+		// producer_sequence: 5, highest_read_by_consumers: 4
 		assert_eq!(7, ring_buffer.free_slots(5, 4));
-		// Publisher has just released 5 and consumer has read 5.
+		// producer_sequence: 5, highest_read_by_consumers: 5
 		assert_eq!(8, ring_buffer.free_slots(5, 5));
 
 		// Round 2:
-		// Publisher has just published 11 and consumer has read 9.
+		// producer_sequence: 11, highest_read_by_consumers: 9
 		assert_eq!(6, ring_buffer.free_slots(11, 9));
-		// Publisher has just published 12 and consumer has read 12.
+		// producer_sequence: 12, highest_read_by_consumers: 12
 		assert_eq!(8, ring_buffer.free_slots(12, 12));
-		// Consumer has read 7 and the publisher has just published 15.
+		// producer_sequence: 15, highest_read_by_consumers: 7
 		assert_eq!(0, ring_buffer.free_slots(15, 7));
 	}
 }

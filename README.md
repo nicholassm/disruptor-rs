@@ -78,9 +78,9 @@ fn main() {
             e.price = 42.0;
         }
     });
-}// At this point, the Producer instance goes out of scope and when the
- // processor is done handling all events then the Disruptor is dropped
- // as well.
+    
+    // At this point, the Producer instance goes out of scope and when the processor is done handling all events, the Disruptor is dropped as well.
+}
 ```
 
 ## Pinning Threads and Dependencies Between Processors
@@ -139,9 +139,8 @@ fn main() {
             }
         });
     });
-}// At this point, the Producers instances go out of scope and when the
- // processors are done handling all events then the Disruptor is dropped
- // as well.
+    // At this point, the Producer instance goes out of scope and when the processor is done handling all events, the Disruptor is dropped as well
+}
 ```
 
 ## Processors with State

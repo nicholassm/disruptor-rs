@@ -79,7 +79,9 @@ fn main() {
         }
     });
     
-    // At this point, the Producer instance goes out of scope and when the processor is done handling all events, the Disruptor is dropped as well.
+    // At this point, the Producer instance goes out of scope.
+    // When the processor is done handling all events,
+    // the Disruptor is dropped as well.
 }
 ```
 
@@ -139,7 +141,9 @@ fn main() {
             }
         });
     });
-    // At this point, the Producer instance goes out of scope and when the processor is done handling all events, the Disruptor is dropped as well
+    // At this point, the Producer instance goes out of scope.
+    // When the processor is done handling all events,
+    // the Disruptor is dropped as well.
 }
 ```
 

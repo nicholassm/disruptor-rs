@@ -168,9 +168,10 @@
 //!             }
 //!         });
 //!     });
-//! }// At this point, the Producers instances go out of scope and when the
-//!  // processors are done handling all events then the Disruptor is dropped
-//!  // as well.
+//!     // At this point, the Producers instances go out of scope and when the
+//!     // processors are done handling all events, the Disruptor is dropped
+//!     // as well.
+//! }
 //! ```
 //!
 //! ### Adding Custom State That is Neither `Send` Nor `Sync`
@@ -246,8 +247,9 @@
 //!             for event in &mut events {
 //!                 println!("Processing event: {:?}", event);
 //!             }
-//!         },// At this point the EventGuard (here named `events`) is dropped,
-//!           // signaling the Disruptor that the events have been processed.
+//!             // At this point the EventGuard (here named `events`) is dropped,
+//!             // signaling the Disruptor that the events have been processed.
+//!         },
 //!         Err(Polling::NoEvents) => { /* Do other work or try again. */ },
 //!         Err(Polling::Shutdown) => { break; }, // Exit the loop if the Disruptor is shut down.
 //!     }

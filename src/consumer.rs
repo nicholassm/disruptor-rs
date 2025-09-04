@@ -22,12 +22,12 @@ impl Consumer {
 	}
 }
 
-#[doc(hidden)]
+/// Barrier tracking a single consumer.
 pub struct SingleConsumerBarrier {
 	cursor: Arc<Cursor>
 }
 
-#[doc(hidden)]
+/// Barrier tracking the minimum sequence of a group of consumers.
 pub struct MultiConsumerBarrier {
 	cursors: Vec<Arc<Cursor>>
 }

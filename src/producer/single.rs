@@ -165,7 +165,6 @@ impl<E, C> Drop for SingleProducer<E, C> {
 }
 
 /// Barrier for a single producer.
-#[doc(hidden)]
 pub struct SingleProducerBarrier {
 	cursor: Cursor
 }

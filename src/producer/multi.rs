@@ -228,7 +228,6 @@ where
 }
 
 /// Barrier for multiple producers.
-#[doc(hidden)]
 pub struct MultiProducerBarrier {
 	cursor:      Cursor,
 	/// AtomicU64s each track availability of 64 slots.

@@ -110,8 +110,7 @@ fn run_benchmark(
 			// Wait for all producers to finish publication.
 			while sink.load(Acquire) != count {/* Busy spin. */}
 		}
-		let elapsed = start.elapsed();
-		elapsed
+		start.elapsed()
 	}));
 }
 

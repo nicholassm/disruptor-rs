@@ -29,10 +29,6 @@ name = "mpsc"
 harness = false
 
 [[bench]]
-name = "mpsc_contention"
-harness = false
-
-[[bench]]
 name = "poller"
 harness = false
 

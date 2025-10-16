@@ -229,6 +229,7 @@ where
 
 /// Barrier for multiple producers.
 pub struct MultiProducerBarrier {
+	/// Cursor used by producers to claim exclusive sequences per producer.
 	cursor:      Cursor,
 	/// AtomicU64s each track availability of 64 slots.
 	/// Each bit in the AtomicU64 encodes whether the slot was published in an even or odd round.
@@ -245,7 +246,7 @@ impl MultiProducerBarrier {
 	pub(crate) fn new(size: usize) -> Self {
 		assert!(size >= 64, "Multi Producer Disruptor must have a size of minimum 64 slots.");
 
-		let cursor      = Cursor::new(-1);
+		let cursor      = Cursor::new(NONE);
 		let i64_needed  = size/64;
 		// available encodes 1 bit for each slot.
 		// If the bit is 1 it means that the slot was published in the latest odd round
@@ -397,6 +398,13 @@ mod tests {
 		assert_eq!(3, MultiProducerBarrier::log2(9));
 		assert_eq!(3, MultiProducerBarrier::log2(10));
 		assert_eq!(3, MultiProducerBarrier::log2(11));
+	}
+
+	#[test]
+	fn initial_available_sequence_number() {
+		let barrier = MultiProducerBarrier::new(64);
+
+		assert_eq!(barrier.get_after(0), -1);
 	}
 
 	#[test]

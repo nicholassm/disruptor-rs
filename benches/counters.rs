@@ -4,15 +4,15 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use crossbeam::channel::*;
+use disruptor::{build_multi_producer, build_single_producer, BusySpin, Producer};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use disruptor::{build_multi_producer, build_single_producer, BusySpin, Producer};
 
-const BUF_SIZE:            usize = 32_768;
+const BUF_SIZE: usize = 32_768;
 const MAX_PRODUCER_EVENTS: usize = 10_000_000;
-const BATCH_SIZE:          usize = 2_000;
+const BATCH_SIZE: usize = 2_000;
 
 fn crossbeam_spsc() {
     let (s, r) = bounded(BUF_SIZE);
@@ -89,16 +89,15 @@ fn crossbeam_mpsc_benchmark(c: &mut Criterion) {
     });
 }
 
-
 struct Event {
-    val: i32
+    val: i32,
 }
 
 fn disruptor_spsc() {
-    let factory = || { Event { val: 0 }}; //to initialize disruptor
+    let factory = || Event { val: 0 }; //to initialize disruptor
 
     let sink = Arc::new(AtomicI32::new(0)); //bcos we read and print value from main thread
-    // Consumer
+                                            // Consumer
     let processor = {
         let sink = Arc::clone(&sink);
         move |event: &Event, _sequence: i64, _end_of_batch: bool| {
@@ -113,7 +112,7 @@ fn disruptor_spsc() {
     // Publish into the Disruptor.
     thread::scope(|s| {
         s.spawn(move || {
-            for _ in 0..MAX_PRODUCER_EVENTS/BATCH_SIZE {
+            for _ in 0..MAX_PRODUCER_EVENTS / BATCH_SIZE {
                 producer.batch_publish(BATCH_SIZE, |iter| {
                     for e in iter {
                         e.val = black_box(1);
@@ -127,10 +126,10 @@ fn disruptor_spsc() {
 }
 
 fn disruptor_mpsc() {
-    let factory = || { Event { val: 0 }}; //to initialize disruptor
+    let factory = || Event { val: 0 }; //to initialize disruptor
 
     let sink = Arc::new(AtomicI32::new(0)); //bcos we read and print value from main thread
-    // Consumer
+                                            // Consumer
     let processor = {
         let sink = Arc::clone(&sink);
         move |event: &Event, _sequence: i64, _end_of_batch: bool| {
@@ -147,7 +146,7 @@ fn disruptor_mpsc() {
     // Publish into the Disruptor.
     thread::scope(|s| {
         s.spawn(move || {
-            for _ in 0..MAX_PRODUCER_EVENTS/BATCH_SIZE {
+            for _ in 0..MAX_PRODUCER_EVENTS / BATCH_SIZE {
                 producer1.batch_publish(BATCH_SIZE, |iter| {
                     for e in iter {
                         e.val = black_box(1);
@@ -157,7 +156,7 @@ fn disruptor_mpsc() {
         });
 
         s.spawn(move || {
-            for _ in 0..MAX_PRODUCER_EVENTS/BATCH_SIZE {
+            for _ in 0..MAX_PRODUCER_EVENTS / BATCH_SIZE {
                 producer2.batch_publish(BATCH_SIZE, |iter| {
                     for e in iter {
                         e.val = 1;
@@ -169,7 +168,6 @@ fn disruptor_mpsc() {
 
     sink.load(Ordering::Acquire);
 }
-
 
 fn disruptor_spsc_benchmark(c: &mut Criterion) {
     c.bench_function("disruptor_spsc", |b| {
@@ -187,5 +185,11 @@ fn disruptor_mpsc_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(counters, crossbeam_spsc_benchmark, disruptor_spsc_benchmark, crossbeam_mpsc_benchmark, disruptor_mpsc_benchmark);
+criterion_group!(
+    counters,
+    crossbeam_spsc_benchmark,
+    disruptor_spsc_benchmark,
+    crossbeam_mpsc_benchmark,
+    disruptor_mpsc_benchmark
+);
 criterion_main!(counters);

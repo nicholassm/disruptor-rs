@@ -306,6 +306,42 @@ let processor1 = |e: &Event, sequence: Sequence, _end_of_batch: bool| {
 
 This scheme ensures each event is processed once.
 
+## Consumer Dependency Graph (e.g. WAL fsync or replication ACK)
+
+You can gate a downstream stage on external sequences (e.g., “flushed to disk” or “replicated”) so it only
+processes events that have crossed those durability boundaries.
+
+```rust
+use disruptor::{build_single_producer, BusySpin, DependentSequence, Sequence};
+use std::sync::Arc;
+
+// External gate the handler will advance after fsync/ack.
+let flushed = Arc::new(DependentSequence::new());
+
+let journal = {
+    let flushed = flushed.clone();
+    move |event: &Event, seq: Sequence, _eob: bool| {
+        wal_append(event);
+        wal_fsync().unwrap();
+        flushed.set(seq); // advance only after persistence
+    }
+};
+
+let engine = |event: &Event, _seq: Sequence, _eob: bool| {
+    apply_business_logic(event);
+};
+
+let mut producer = build_single_producer(1024, factory, BusySpin)
+    .handle_events_with(journal)                    // stage 1
+    .and_then_with_dependents(vec![flushed.clone()])// stage boundary gated by external seq
+    .handle_events_with(engine)                     // stage 2
+    .build();
+```
+
+You can pass multiple gates (e.g., `vec![flushed, replicated]`), and the stage will only advance to the
+minimum of all dependencies. Producer backpressure still uses the slowest consumer/gate, so you remain
+overwrite-safe.
+
 # Features
 
 - [x] Single Producer Single Consumer (SPSC).
@@ -318,6 +354,7 @@ This scheme ensures each event is processed once.
 - [x] Event Poller API.
 - [x] Thread affinity can be set for the event processor thread(s).
 - [x] Set thread name of each event processor thread.
+- [x] Dependent sequences (gates) on handler stages
 
 # Design Choices
 
@@ -414,6 +451,7 @@ Both libraries greatly improves as the burst size goes up but the Disruptor's pe
 # Related Work
 
 There are multiple other Rust projects that mimic the LMAX Disruptor library:
+
 1. [Turbine](https://github.com/polyfractal/Turbine)
 2. [Disrustor](https://github.com/sklose/disrustor)
 

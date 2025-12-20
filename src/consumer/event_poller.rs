@@ -38,9 +38,9 @@ use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 ///     }
 ///     // 2. Or limit the number of events per poll:
 ///     match event_poller.poll_take(64) {
-///         Ok(mut guard) => {
+///         Ok(mut events) => {
 ///             // Process events same as above but yielding at most 64 events.
-///             for event in &mut guard {
+///             for event in &mut events {
 ///                 println!("Processing event: {:?}", event);
 ///             }
 ///         },

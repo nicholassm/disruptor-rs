@@ -52,7 +52,7 @@
 //! }
 //!
 //! // Define a factory for populating the ring buffer with events.
-//! let factory = || { Event { price: 0.0 }};
+//! let factory = || Event { price: 0.0 };
 //!
 //! // Define a closure for processing events. A thread, controlled by the disruptor, will run this
 //! // processor closure each time an event is published.
@@ -91,7 +91,7 @@
 //!     price: f64
 //! }
 //!
-//! let factory = || { Event { price: 0.0 }};
+//! let factory = || Event { price: 0.0 };
 //!
 //! let processor = |e: &Event, sequence: Sequence, end_of_batch: bool| {
 //!     // Processing logic.
@@ -126,7 +126,7 @@
 //! # #[cfg(not(miri))]
 //! fn main() {
 //!     // Factory closure for initializing events in the Ring Buffer.
-//!     let factory = || { Event { price: 0.0 }};
+//!     let factory = || Event { price: 0.0 };
 //!
 //!     // Closure for processing events.
 //!     let h1 = |e: &Event, sequence: Sequence, end_of_batch: bool| {
@@ -191,8 +191,8 @@
 //!     data: Rc<RefCell<i32>>
 //! }
 //!
-//! let factory = || { Event { price: 0.0 }};
-//! let initial_state = || { State::default() };
+//! let factory = || Event { price: 0.0 };
+//! let initial_state = || State::default();
 //!
 //! // Closure for processing events *with* state.
 //! let processor = |s: &mut State, e: &Event, _: Sequence, _: bool| {
@@ -224,7 +224,7 @@
 //!     price: f64
 //! }
 //!
-//! let factory = || { Event { price: 0.0 }};
+//! let factory = || Event { price: 0.0 };
 //! let builder = build_single_producer(8, factory, BusySpin);
 //! let (mut event_poller, builder) = builder.event_poller();
 //! let mut producer = builder.build();
@@ -239,19 +239,31 @@
 //!
 //! // Process events.
 //! loop {
+//!     // 1. Either poll for all available events.
 //!     match event_poller.poll() {
-//!         Ok(mut events) => {
+//!         Ok(mut guard) => {
 //!             // Batch process events if efficient in your use case.
-//!             let batch_size = (&mut events).len();
-//!             // Read events with an iterator.
-//!             for event in &mut events {
+//!             let batch_size = (&mut guard).len();
+//!             // Guard is an `Iterator` so read events by iterating.
+//!             for event in &mut guard {
 //!                 println!("Processing event: {:?}", event);
 //!             }
-//!             // At this point the EventGuard (here named `events`) is dropped,
+//!             // At this point the EventGuard is dropped,
 //!             // signaling the Disruptor that the events have been processed.
 //!         },
 //!         Err(Polling::NoEvents) => { /* Do other work or try again. */ },
 //!         Err(Polling::Shutdown) => { break; }, // Exit the loop if the Disruptor is shut down.
+//!     }
+//!     // 2. Or limit the maximum number of events yielded per poll.
+//!     match event_poller.poll_take(64) {
+//!         Ok(mut guard) => {
+//!             // Max 64 events (or fewer if less available) are yielded.
+//!             for event in &mut guard {
+//!                 println!("Processing event: {:?}", event);
+//!             }
+//!         },
+//!         Err(Polling::NoEvents) => { },
+//!         Err(Polling::Shutdown) => { break; },
 //!     }
 //! }
 //! ```
@@ -296,7 +308,7 @@ mod tests {
 	}
 
 	fn factory() -> impl Fn() -> Event {
-		|| { Event { num: -1 }}
+		|| Event { num: -1 }
 	}
 
 	#[test]
@@ -851,20 +863,26 @@ mod tests {
 		let expected = vec![1, 2];
 
 		{// Only first poller sees events.
-			let mut guard_1 = ep1.poll().ok().unwrap();
-			assert_eq!(ep2.poll().err(), Some(Polling::NoEvents));
-			assert_eq!(ep3.poll().err(), Some(Polling::NoEvents));
+			let mut guard_1 = ep1.poll().unwrap();
+			assert_eq!(ep2.poll().err(),       Some(Polling::NoEvents));
+			assert_eq!(ep2.poll_take(2).err(), Some(Polling::NoEvents));
+			assert_eq!(ep3.poll().err(),       Some(Polling::NoEvents));
+			assert_eq!(ep3.poll_take(2).err(), Some(Polling::NoEvents));
 			assert_eq!(expected, guard_1.map(|e| e.num).collect::<Vec<_>>());
 		}
 
-		{// Now second poller sees events.
-			let mut guard_2 = ep2.poll().ok().unwrap();
+		{// Now second poller sees events - here one at a time.
+			let mut guard_2 = ep2.poll_take(1).unwrap();
 			assert_eq!(ep3.poll().err(), Some(Polling::NoEvents));
-			assert_eq!(expected, guard_2.map(|e| e.num).collect::<Vec<_>>());
+			assert_eq!(vec![1], guard_2.map(|e| e.num).collect::<Vec<_>>());
+			drop(guard_2);
+			// Read next event.
+			let mut guard_2 = ep2.poll_take(1).unwrap();
+			assert_eq!(vec![2], guard_2.map(|e| e.num).collect::<Vec<_>>());
 		}
 
-		{// Now third poller sees events.
-			let mut guard_3 = ep3.poll().ok().unwrap();
+		{// Now third poller sees both events.
+			let mut guard_3 = ep3.poll().unwrap();
 			assert_eq!(expected, guard_3.map(|e| e.num).collect::<Vec<_>>());
 		}
 
@@ -896,20 +914,24 @@ mod tests {
 		let expected = HashSet::from([1, 2]);
 
 		{// Only first poller sees events.
-			let mut guard_1 = ep1.poll().ok().unwrap();
+			let mut guard_1 = ep1.poll().unwrap();
 			assert_eq!(ep2.poll().err(), Some(Polling::NoEvents));
 			assert_eq!(ep3.poll().err(), Some(Polling::NoEvents));
 			assert_eq!(expected, guard_1.map(|e| e.num).collect::<HashSet<_>>());
 		}
 
-		{// Now second poller sees events.
-			let mut guard_2 = ep2.poll().ok().unwrap();
+		{// Now second poller sees events - here one at a time.
+			let mut guard_2 = ep2.poll_take(1).unwrap();
 			assert_eq!(ep3.poll().err(), Some(Polling::NoEvents));
-			assert_eq!(expected, guard_2.map(|e| e.num).collect::<HashSet<_>>());
+			assert_eq!(vec![1], guard_2.map(|e| e.num).collect::<Vec<_>>());
+			drop(guard_2);
+			// Read next event.
+			let mut guard_2 = ep2.poll_take(1).unwrap();
+			assert_eq!(vec![2], guard_2.map(|e| e.num).collect::<Vec<_>>());
 		}
 
-		{// Now third poller sees events.
-			let mut guard_3 = ep3.poll().ok().unwrap();
+		{// Now third poller sees both events.
+			let mut guard_3 = ep3.poll().unwrap();
 			assert_eq!(expected, guard_3.map(|e| e.num).collect::<HashSet<_>>());
 		}
 
@@ -944,7 +966,7 @@ mod tests {
 		let expected = vec![1, 2];
 
 		{// Only first poller sees events.
-			let mut guard_1 = ep1.poll().ok().unwrap();
+			let mut guard_1 = ep1.poll().unwrap();
 			assert_eq!(ep2.poll().err(), Some(Polling::NoEvents));
 			assert_eq!(expected, guard_1.map(|e| e.num).collect::<Vec<_>>());
 		}
@@ -952,7 +974,7 @@ mod tests {
 		assert_eq!(ep1.poll().err(), Some(Polling::Shutdown));
 
 		{// Now second poller sees events.
-			let mut guard_2 = ep2.poll().ok().unwrap();
+			let mut guard_2 = ep2.poll().unwrap();
 			assert_eq!(expected, guard_2.map(|e| e.num).collect::<Vec<_>>());
 		}
 
@@ -1001,14 +1023,12 @@ mod tests {
 		drop(s_seq);
 		drop(s_error);
 
-		let factory = || {
-			StressEvent {
+		let factory = || StressEvent {
 				i: -1,
 				a: -1,
 				b: -1,
 				s: "".to_string()
-			}
-		};
+			};
 
 		let producer = build_multi_producer(1 << 16, factory, BusySpin)
 			.handle_events_with(processors[0].take().unwrap())

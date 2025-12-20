@@ -26,7 +26,7 @@ It's heavily inspired by the brilliant
 
 Add the following to your `Cargo.toml` file:
 
-    disruptor = "3.6.1"
+    disruptor = "3.7.0"
 
 To read details of how to use the library, check out the documentation on [docs.rs/disruptor](https://docs.rs/disruptor).
 
@@ -200,7 +200,7 @@ struct Event {
 
 fn main() {
     // Factory closure for initializing events in the Ring Buffer.
-    let factory = || { Event { price: 0.0 }};
+    let factory = || Event { price: 0.0 };
 
     let size = 64;
     let builder = disruptor::build_single_producer(size, factory, BusySpin);
@@ -222,7 +222,7 @@ fn main() {
                 for event in &mut events {
                     // Process events here.
                 }
-            },// When guard (here named `events`) goes out of scope,
+            },// When the guard (here named `events`) goes out of scope,
               // it signals to the Disruptor that reading is done.
             Err(Polling::NoEvents) => {
                 // Do other work or poll again.

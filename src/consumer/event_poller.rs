@@ -15,18 +15,19 @@ use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 ///# struct Event {
 ///#     price: f64
 ///# }
-///# let factory = || { Event { price: 0.0 }};
+///# let factory = || Event { price: 0.0 };
 ///# let builder = build_single_producer(8, factory, BusySpin);
 ///# let (mut event_poller, builder) = builder.event_poller();
 ///# let mut producer = builder.build();
 ///# producer.publish(|e| { e.price = 42.0; });
 ///# drop(producer);
 /// loop {
+///     // 1. Either poll all available events:
 ///     match event_poller.poll() {
 ///         Ok(mut events) => {
 ///             // Batch process events if efficient in your use case.
 ///             let batch_size = (&mut events).len();
-///             // Read events with an iterator.
+///             // The guard named `events` is an `Iterator` so you can read events by iterating.
 ///             for event in &mut events {
 ///                 println!("Processing event: {:?}", event);
 ///             }
@@ -34,6 +35,17 @@ use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 ///           // signaling the Disruptor that the events have been processed.
 ///         Err(Polling::NoEvents) => { /* Do other work or try again. */ },
 ///         Err(Polling::Shutdown) => { break; }, // Exit the loop if the Disruptor is shut down.
+///     }
+///     // 2. Or limit the number of events per poll:
+///     match event_poller.poll_take(64) {
+///         Ok(mut guard) => {
+///             // Process events same as above but yielding at most 64 events.
+///             for event in &mut guard {
+///                 println!("Processing event: {:?}", event);
+///             }
+///         },
+///         Err(Polling::NoEvents) => {},
+///         Err(Polling::Shutdown) => { break; },
 ///     }
 /// }
 /// ```
@@ -120,10 +132,85 @@ where
 		}
 	}
 
-	/// Returns the next available event or an error if no events are available or the Disruptor is shut down.
+	/// Polls the ring buffer and returns an [`EventGuard`] if any events are available.
+	/// The guard can be used like an iterator and yields all available events at the time of polling.
+	/// Dropping the guard will signal to the Disruptor that the events have been processed.
+	///
 	/// This method does not block; it will return immediately.
+	///
+	/// This method is equivalent to calling [`EventPoller::poll_take`] with `u64::MAX` as the limit.
+	///
+	/// # Errors
+	///
+	/// This method returns an error if:
+	/// 1. No events are available: [`Polling::NoEvents`]
+	/// 2. The Disruptor is shut down: [`Polling::Shutdown`]
+	///
+	/// # Examples
+	///
+	/// ```
+	///# use disruptor::*;
+	///#
+	///# #[derive(Debug)]
+	///# struct Event {
+	///#     price: f64
+	///# }
+	///# let factory = || Event { price: 0.0 };
+	///# let builder = build_single_producer(8, factory, BusySpin);
+	///# let (mut event_poller, builder) = builder.event_poller();
+	///# let mut producer = builder.build();
+	///# producer.publish(|e| { e.price = 42.0; });
+	///# drop(producer);
+	/// match event_poller.poll() {
+	///     Ok(mut events) => {
+	///         for event in &mut events {
+	///             // ...
+	///         }
+	///     },
+	///     Err(Polling::NoEvents) => { /* ... */ },
+	///     Err(Polling::Shutdown) => { /* ... */ },
+	/// };
+	/// ```
 	pub fn poll(&mut self) -> Result<EventGuard<'_, E, B>, Polling> {
-		let sequence = self.cursor.relaxed_value() + 1;
+		self.poll_take(u64::MAX)
+	}
+
+	/// Polls for available events, yielding at most `limit` events.
+	///
+	/// This method behaves like [`EventPoller::poll`], but caps the number of events yielded by the returned
+	/// [`EventGuard`]. Fewer events may be yielded if less are available at the time of polling.
+	///
+	/// Note: A `limit` of zero returns an [`EventGuard`] that yields no events (and not an [Polling::NoEvents] error).
+	///
+	/// # Examples
+	///
+	/// ```
+	///# use disruptor::*;
+	///#
+	///# #[derive(Debug)]
+	///# struct Event {
+	///#     price: f64
+	///# }
+	///# let factory = || Event { price: 0.0 };
+	///# let builder = build_single_producer(8, factory, BusySpin);
+	///# let (mut event_poller, builder) = builder.event_poller();
+	///# let mut producer = builder.build();
+	///# producer.publish(|e| { e.price = 42.0; });
+	///# drop(producer);
+	/// match event_poller.poll_take(64) {
+	///     Ok(mut events) => {
+	///         // Process events same as above but yielding at most 64 events.
+	///         for event in &mut events {
+	///             // ...
+	///         }
+	///     },
+	///     Err(Polling::NoEvents) => { /* ... */ },
+	///     Err(Polling::Shutdown) => { /* ... */ },
+	/// };
+	/// ```
+	pub fn poll_take(&mut self, limit: u64) -> Result<EventGuard<'_, E, B>, Polling> {
+		let cursor_at = self.cursor.relaxed_value();
+		let sequence  = cursor_at + 1;
 
 		if sequence == self.shutdown_at_sequence.load(Ordering::Relaxed) {
 			return Err(Polling::Shutdown);
@@ -134,6 +221,9 @@ where
 			return Err(Polling::NoEvents);
 		}
 		fence(Ordering::Acquire);
+
+		let max_sequence = (cursor_at).saturating_add_unsigned(limit);
+		let available    = std::cmp::min(available, max_sequence);
 
 		Ok(EventGuard {
 			parent: self,

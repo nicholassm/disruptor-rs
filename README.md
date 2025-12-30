@@ -10,11 +10,13 @@ This library is a low latency, inter-thread communication library written in Rus
 It's heavily inspired by the brilliant
 [Disruptor library from LMAX](https://github.com/LMAX-Exchange/disruptor).
 
+Use it when you want to trade CPU resources for lower latency and higher throughput compared to e.g. Crossbeam or `std::sync::mpsc` channels.
+
 # Contents
 
 - [Getting Started](#getting-started)
-- [Patterns](#patterns)
 - [Features](#features)
+- [Patterns](#patterns)
 - [Design Choices](#design-choices)
 - [Correctness](#correctness)
 - [Performance](#performance)
@@ -236,6 +238,19 @@ fn main() {
 }
 ```
 
+# Features
+
+- [x] Single Producer Single Consumer (SPSC).
+- [x] Single Producer Multi Consumer (SPMC) with consumer interdependencies.
+- [x] Multi Producer Single Consumer (MPSC).
+- [x] Multi Producer Multi Consumer (MPMC) with consumer interdependencies.
+- [x] Busy-spin wait strategies.
+- [x] Batch publication of events.
+- [x] Batch consumption of events.
+- [x] Event Poller API.
+- [x] Thread affinity can be set for the event processor thread(s).
+- [x] Set thread name of each event processor thread.
+
 # Patterns
 
 ## A Disruptor with Different Event Types
@@ -305,19 +320,6 @@ let processor1 = |e: &Event, sequence: Sequence, _end_of_batch: bool| {
 ```
 
 This scheme ensures each event is processed once.
-
-# Features
-
-- [x] Single Producer Single Consumer (SPSC).
-- [x] Single Producer Multi Consumer (SPMC) with consumer interdependencies.
-- [x] Multi Producer Single Consumer (MPSC).
-- [x] Multi Producer Multi Consumer (MPMC) with consumer interdependencies.
-- [x] Busy-spin wait strategies.
-- [x] Batch publication of events.
-- [x] Batch consumption of events.
-- [x] Event Poller API.
-- [x] Thread affinity can be set for the event processor thread(s).
-- [x] Set thread name of each event processor thread.
 
 # Design Choices
 

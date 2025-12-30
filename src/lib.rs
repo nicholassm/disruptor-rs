@@ -744,9 +744,16 @@ mod tests {
 			move |e: &Event, _, _| { s.send(e.num + 4).unwrap(); }
 		};
 		let processor6 = {
+			let s = s.clone();
 			move |state: &mut RefCell<i64>, e: &Event, _, _| {
 				*state.borrow_mut() += e.num;
 				s.send(*state.borrow() + 30).unwrap();
+			}
+		};
+		let processor7 = {
+			move |state: &mut RefCell<i64>, e: &Event, _, _| {
+				*state.borrow_mut() += e.num;
+				s.send(*state.borrow() + 40).unwrap();
 			}
 		};
 
@@ -761,6 +768,7 @@ mod tests {
 				.and_then()
 					.handle_events_with(processor5)
 					.handle_events_and_state_with(processor6, || { RefCell::new(0) })
+					.handle_events_and_state_with(processor7, || { RefCell::new(0) })
 			.build();
 
 		producer.publish(|e| { e.num = 1; });
@@ -768,7 +776,7 @@ mod tests {
 
 		let mut result: Vec<i64> = r.iter().collect();
 		result.sort();
-		assert_eq!(vec![1, 3, 5, 11, 21, 31], result);
+		assert_eq!(vec![1, 3, 5, 11, 21, 31, 41], result);
 	}
 
 	#[test]
@@ -788,23 +796,30 @@ mod tests {
 		};
 		let processor3 = {
 			let s = s.clone();
-			move |e: &Event, _, _| { s.send(e.num + 2).unwrap(); }
-		};
-		let processor4 = {
-			let s = s.clone();
 			move |state: &mut RefCell<i64>, e: &Event, _, _| {
 				*state.borrow_mut() += e.num;
 				s.send(*state.borrow() + 20).unwrap();
 			}
+		};
+		let processor4 = {
+			let s = s.clone();
+			move |e: &Event, _, _| { s.send(e.num + 2).unwrap(); }
 		};
 		let processor5 = {
 			let s = s.clone();
 			move |e: &Event, _, _| { s.send(e.num + 4).unwrap(); }
 		};
 		let processor6 = {
+			let s = s.clone();
 			move |state: &mut RefCell<i64>, e: &Event, _, _| {
 				*state.borrow_mut() += e.num;
 				s.send(*state.borrow() + 30).unwrap();
+			}
+		};
+		let processor7 = {
+			move |state: &mut RefCell<i64>, e: &Event, _, _| {
+				*state.borrow_mut() += e.num;
+				s.send(*state.borrow() + 40).unwrap();
 			}
 		};
 
@@ -813,11 +828,12 @@ mod tests {
 			.handle_events_with(processor1)
 			.handle_events_and_state_with(processor2, || { RefCell::new(0) })
 			.and_then()
-				.handle_events_with(processor3)
-				.handle_events_and_state_with(processor4, || { RefCell::new(0) })
+				.handle_events_and_state_with(processor3, || { RefCell::new(0) })
+				.handle_events_with(processor4)
 				.and_then()
 					.handle_events_with(processor5)
 					.handle_events_and_state_with(processor6, || { RefCell::new(0) })
+					.handle_events_and_state_with(processor7, || { RefCell::new(0) })
 			.build();
 
 		let mut producer2 = producer1.clone();
@@ -834,7 +850,7 @@ mod tests {
 
 		let mut result: Vec<i64> = r.iter().collect();
 		result.sort();
-		assert_eq!(vec![1, 1, 3, 3, 5, 5, 11, 12, 21, 22, 31, 32], result);
+		assert_eq!(vec![1, 1, 3, 3, 5, 5, 11, 12, 21, 22, 31, 32, 41, 42], result);
 	}
 
 	#[test]

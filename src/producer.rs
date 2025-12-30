@@ -69,13 +69,6 @@ impl<'a, E> Iterator for MutBatchIter<'a, E> {
 		let remaining = self.remaining();
 		(remaining, Some(remaining))
 	}
-
-	fn count(self) -> usize
-	where
-		Self: Sized,
-	{
-		self.remaining()
-	}
 }
 
 /// Producer used for publishing into the Disruptor.

@@ -10,7 +10,7 @@ This library is a low latency, inter-thread communication library written in Rus
 It's heavily inspired by the brilliant
 [Disruptor library from LMAX](https://github.com/LMAX-Exchange/disruptor).
 
-Use it when you want to trade CPU resources for lower latency and higher throughput compared to e.g. Crossbeam or `std::sync::mpsc` channels.
+Use it when you want to trade CPU resources for lower latency and higher throughput compared to e.g. Crossbeam or [std::sync::mpsc](https://doc.rust-lang.org/std/sync/mpsc/) channels.
 
 # Contents
 
@@ -28,7 +28,7 @@ Use it when you want to trade CPU resources for lower latency and higher through
 
 Add the following to your `Cargo.toml` file:
 
-    disruptor = "3.7.0"
+    disruptor = "3.7.1"
 
 To read details of how to use the library, check out the documentation on [docs.rs/disruptor](https://docs.rs/disruptor).
 

@@ -544,23 +544,17 @@ mod tests {
 
 	#[test]
 	fn spsc_disruptor_with_zero_batch_publication() {
-		let (s, r)    = mpsc::channel();
-		let processor = move |e: &Event, _, _| {
-			s.send(e.num).expect("Should be able to send.");
+		let processor = |_e: &Event, _, _| {
+			panic!("No events should be published.");
 		};
 		let mut producer = build_single_producer(8, factory(), BusySpin)
 			.handle_events_with(processor)
 			.build();
 
 		producer.batch_publish(0, |iter| {
-			for e in iter {
-				e.num = 1;
-			}
+			assert_eq!(0, iter.count());
 		});
 		drop(producer);
-
-		let result: Vec<_> = r.iter().collect();
-		assert_eq!(result, []);
 	}
 
 	#[test]
@@ -864,6 +858,7 @@ mod tests {
 
 		{// Only first poller sees events.
 			let mut guard_1 = ep1.poll().unwrap();
+			assert_eq!(2, (&mut guard_1).len());
 			assert_eq!(ep2.poll().err(),       Some(Polling::NoEvents));
 			assert_eq!(ep2.poll_take(2).err(), Some(Polling::NoEvents));
 			assert_eq!(ep3.poll().err(),       Some(Polling::NoEvents));
@@ -994,34 +989,28 @@ mod tests {
 			s: String,
 		}
 
-		let (s_seq,   r_seq)   = mpsc::channel();
-		let (s_error, r_error) = mpsc::channel();
-		let num_events         = 250_000;
-		let producers          = 4;
-		let consumers          = 3;
+		let (s_seq, r_seq)         = mpsc::channel();
+		let num_events             = 250_000;
+		let producers              = 4;
+		let consumers              = 3;
 
 		let mut processors: Vec<_> = (0..consumers).into_iter().map(|pid| {
-			let s_error      = s_error.clone();
 			let s_seq        = s_seq.clone();
 			let mut prev_seq = -1;
 			Some(move |e: &StressEvent, sequence, _| {
-				if e.a != e.i - 5
-				|| e.b != e.i + 7
-				|| e.s != format!("Blackbriar {}", e.i).to_string()
-				|| sequence != prev_seq + 1 {
-					s_error.send(1).expect("Should send.");
-				}
-				else {
-					prev_seq                 = sequence;
-					let sequence_seen_by_pid = sequence*consumers + pid;
-					s_seq.send(sequence_seen_by_pid).expect("Should send.");
-				}
+				assert_eq!(e.a, e.i - 5);
+				assert_eq!(e.b, e.i + 7);
+				assert_eq!(e.s, format!("Blackbriar {}", e.i).to_string());
+				assert_eq!(sequence, prev_seq + 1);
+
+				prev_seq                 = sequence;
+				let sequence_seen_by_pid = sequence*consumers + pid;
+				s_seq.send(sequence_seen_by_pid).expect("Should send.");
 			})
 		}).collect();
 
-		// Drop unused Senders.
+		// Drop unused Sender.
 		drop(s_seq);
-		drop(s_error);
 
 		let factory = || StressEvent {
 				i: -1,
@@ -1054,10 +1043,8 @@ mod tests {
 		});
 
 		let expected_sequence_reads    = consumers*num_events*producers;
-		let errors: Vec<_>             = r_error.iter().collect();
 		let mut seen_sequences: Vec<_> = r_seq.iter().collect();
 
-		assert!(errors.is_empty());
 		assert_eq!(expected_sequence_reads as usize, seen_sequences.len());
 		// Assert that each consumer saw each sequence number.
 		seen_sequences.sort();

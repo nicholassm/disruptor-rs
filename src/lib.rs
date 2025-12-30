@@ -994,6 +994,48 @@ mod tests {
 		assert_eq!(expected, result);
 	}
 
+	#[test]
+	fn mpmc_with_mixed_event_pollers_and_processors() {
+		let (s, r)        = mpsc::channel();
+		let processor1    = move |e: &Event, _, _| { s.send(e.num).unwrap(); };
+
+		let builder       = build_multi_producer(64, factory(), BusySpin)
+			.handle_events_with(processor1);
+		let (mut ep1, b)  = builder.event_poller();
+		let (mut ep2, b)  = b.and_then().event_poller();
+		let mut producer1 = b.build();
+		let mut producer2 = producer1.clone();
+
+		// Polling before publication should yield no events.
+		assert_eq!(ep1.poll().err(), Some(Polling::NoEvents));
+		assert_eq!(ep2.poll().err(), Some(Polling::NoEvents));
+
+		// Publish two events.
+		producer1.publish(|e| { e.num = 1; });
+		producer2.publish(|e| { e.num = 2; });
+		drop(producer1);
+		drop(producer2);
+
+		let expected = vec![1, 2];
+
+		{// Only first poller sees events.
+			let mut guard_1 = ep1.poll().unwrap();
+			assert_eq!(ep2.poll().err(), Some(Polling::NoEvents));
+			assert_eq!(expected, guard_1.map(|e| e.num).collect::<Vec<_>>());
+		}
+		// Next poll should indicate shutdown to the poller.
+		assert_eq!(ep1.poll().err(), Some(Polling::Shutdown));
+
+		{// Now second poller sees events.
+			let mut guard_2 = ep2.poll().unwrap();
+			assert_eq!(expected, guard_2.map(|e| e.num).collect::<Vec<_>>());
+		}
+
+		let mut result: Vec<i64> = r.iter().collect();
+		result.sort();
+		assert_eq!(expected, result);
+	}
+
 	#[cfg_attr(miri, ignore)]// Miri disabled due to excessive runtime.
 	#[test]
 	fn stress_test() {

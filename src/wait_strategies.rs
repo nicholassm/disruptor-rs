@@ -5,6 +5,7 @@
 //! To "waste" less CPU time and power, use one of the other strategies which have higher latency.
 
 use std::hint;
+use std::thread;
 
 use crate::Sequence;
 
@@ -35,5 +36,36 @@ pub struct BusySpinWithSpinLoopHint;
 impl WaitStrategy for BusySpinWithSpinLoopHint {
 	fn wait_for(&self, _sequence: Sequence) {
 		hint::spin_loop();
+	}
+}
+
+/// This strategy spins for a configurable number of times and then yields the thread.
+#[derive(Copy, Clone)]
+pub struct SpinThenYieldWaitStrategy {
+	spin_cycles: u32
+}
+
+impl SpinThenYieldWaitStrategy {
+	/// Creates a new `SpinThenYieldWaitStrategy`.
+	///
+	/// `spin_cycles` is the number of times the strategy will spin before yielding.
+	pub const fn new(spin_cycles: u32) -> Self {
+		Self { spin_cycles }
+	}
+}
+
+impl Default for SpinThenYieldWaitStrategy {
+	/// Creates a new `SpinThenYieldWaitStrategy` with 100 spin cycles.
+	fn default() -> Self {
+		Self { spin_cycles: 100 }
+	}
+}
+
+impl WaitStrategy for SpinThenYieldWaitStrategy {
+	fn wait_for(&self, _sequence: Sequence) {
+		for _ in 0..self.spin_cycles {
+			hint::spin_loop();
+		}
+		thread::yield_now();
 	}
 }

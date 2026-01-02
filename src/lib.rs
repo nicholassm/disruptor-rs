@@ -285,7 +285,7 @@ mod producer;
 
 pub use crate::builder::{build_single_producer, build_multi_producer, ProcessorSettings};
 pub use crate::producer::{Producer, RingBufferFull, MissingFreeSlots};
-pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint, SpinThenYieldWaitStrategy};
+pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
 pub use crate::producer::{single::{SingleProducer, SingleProducerBarrier}, multi::{MultiProducer,  MultiProducerBarrier}};
 pub use crate::consumer::{SingleConsumerBarrier, MultiConsumerBarrier};
 pub use crate::consumer::event_poller::{EventPoller, Polling, EventGuard};
@@ -540,50 +540,6 @@ mod tests {
 
 		let result: Vec<_> = r.iter().collect();
 		assert_eq!(result, [0, 1, 4, 9, 16, 25, 36, 49, 64]);
-	}
-
-	#[test]
-	fn spsc_disruptor_with_spin_then_yield_wait_strategy() {
-		let (s, r)    = mpsc::channel();
-		let processor = move |e: &Event, _, _| {
-			s.send(e.num).expect("Should be able to send.");
-		};
-		let mut producer = build_single_producer(8, factory(), SpinThenYieldWaitStrategy::new(10))
-			.handle_events_with(processor)
-			.build();
-
-		thread::scope(|s| {
-			s.spawn(move || {
-				for i in 0..10 {
-					producer.publish(|e| e.num = i*i );
-				}
-			});
-		});
-
-		let result: Vec<_> = r.iter().collect();
-		assert_eq!(result, [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]);
-	}
-
-	#[test]
-	fn spsc_disruptor_with_default_spin_then_yield_wait_strategy() {
-		let (s, r)    = mpsc::channel();
-		let processor = move |e: &Event, _, _| {
-			s.send(e.num).expect("Should be able to send.");
-		};
-		let mut producer = build_single_producer(8, factory(), SpinThenYieldWaitStrategy::default())
-			.handle_events_with(processor)
-			.build();
-
-		thread::scope(|s| {
-			s.spawn(move || {
-				for i in 0..10 {
-					producer.publish(|e| e.num = i*i );
-				}
-			});
-		});
-
-		let result: Vec<_> = r.iter().collect();
-		assert_eq!(result, [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]);
 	}
 
 	#[test]

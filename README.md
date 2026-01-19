@@ -333,12 +333,14 @@ There's also no use of dynamic dispatch - everything is monomorphed.
 # Correctness
 
 This library needs to use Unsafe to achieve low latency.
-Although the absence of bugs cannot be guaranteed, these approaches have been used to eliminate bugs:
+Although the absence of bugs or data races cannot be guaranteed without formal proofs, these approaches have been used to eliminate logic errors:
 
 - Minimal usage of Unsafe blocks.
 - High test coverage.
 - All tests are run on Miri in CI/CD.
 - Verification in TLA+ (see the `verification/` folder).
+
+Furthermore, the code is carefully handcrafted by me with only a little bit of AI intellisense (which was carefully reviewed).
 
 # Performance
 

@@ -132,6 +132,14 @@ where
 		}
 	}
 
+	/// Returns a clone of this poller's cursor.
+	///
+	/// Used to wire diamond/DAG topologies where downstream consumers or join barriers
+	/// (e.g. `and_then_joining`) need to track this consumer's progress.
+	pub fn cursor(&self) -> Arc<Cursor> {
+		Arc::clone(&self.cursor)
+	}
+
 	/// Polls the ring buffer and returns an [`EventGuard`] if any events are available.
 	/// The guard can be used like an iterator and yields all available events at the time of polling.
 	/// Dropping the guard will signal to the Disruptor that the events have been processed.
@@ -173,6 +181,20 @@ where
 	/// ```
 	pub fn poll(&mut self) -> Result<EventGuard<'_, E, B>, Polling> {
 		self.poll_take(u64::MAX)
+	}
+
+	/// Returns `true` if there is at least one event available to poll.
+	///
+	/// This is a cheap check (no fence, no mutation) intended for use as a
+	/// double-check before blocking on a condition variable. It does NOT
+	/// advance the cursor or consume any events.
+	///
+	/// Note: This does not check for shutdown. Callers should still call [`poll`](Self::poll) /
+	/// [`poll_take`](Self::poll_take) and handle [`Polling::Shutdown`].
+	#[inline]
+	pub fn has_available(&self) -> bool {
+		let sequence = self.cursor.relaxed_value() + 1;
+		self.dependent_barrier.get_after(sequence) >= sequence
 	}
 
 	/// Polls for available events, yielding at most `limit` events.

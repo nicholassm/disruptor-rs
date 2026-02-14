@@ -284,6 +284,7 @@ mod ringbuffer;
 mod producer;
 
 pub use crate::builder::{build_single_producer, build_multi_producer, ProcessorSettings};
+pub use crate::cursor::Cursor;
 pub use crate::producer::{Producer, RingBufferFull, MissingFreeSlots};
 pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
 pub use crate::producer::{single::{SingleProducer, SingleProducerBarrier}, multi::{MultiProducer,  MultiProducerBarrier}};

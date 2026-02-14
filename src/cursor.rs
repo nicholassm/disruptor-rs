@@ -3,7 +3,16 @@ use crossbeam_utils::CachePadded;
 
 use crate::Sequence;
 
-pub(crate) struct Cursor {
+/// Opaque cursor used to coordinate dependencies between [`EventPoller`](crate::EventPoller)s.
+///
+/// This type is primarily intended to be passed between topology-building APIs such as
+/// [`SPBuilder::branch_poller`](crate::builder::single::SPBuilder::branch_poller),
+/// [`MPBuilder::branch_poller`](crate::builder::multi::MPBuilder::branch_poller), and
+/// [`SPBuilder::and_then_joining`](crate::builder::single::SPBuilder::and_then_joining) /
+/// [`MPBuilder::and_then_joining`](crate::builder::multi::MPBuilder::and_then_joining).
+///
+/// Obtain a cursor via [`EventPoller::cursor`](crate::EventPoller::cursor).
+pub struct Cursor {
 	counter: CachePadded<AtomicI64>
 }
 

@@ -270,11 +270,15 @@
 //!
 //! ### Diamond / DAG Topology
 //!
-//! You can build diamond/DAG topologies by creating a branch [`EventPoller`] that depends on an
-//! earlier consumer and then joining it into a downstream barrier:
+//! You can build DAG topologies where a branch runs in parallel with multiple stages, and is only
+//! joined back at a later point.
+//!
+//! For example, a journaling poller `J` can run in parallel with a multi-stage pipeline, and the
+//! final stage can wait for both the pipeline and `J`:
 //!
 //! ```text
-//! Producer -> A -> [B (branch) || C] -> D (joins B + C)
+//! Producer -> R1 -> ME -> R2 ----\
+//! Producer -> J ---------------> Report (joins R2 + J)
 //! ```
 //!
 //! Use [`SPBuilder::branch_poller`](builder::single::SPBuilder::branch_poller) /
@@ -282,6 +286,9 @@
 //! and [`SPBuilder::and_then_joining`](builder::single::SPBuilder::and_then_joining) /
 //! [`MPBuilder::and_then_joining`](builder::multi::MPBuilder::and_then_joining) to join it into the
 //! downstream dependency chain.
+//!
+//! Note: A branch poller participates in producer back-pressure. If you create one and never poll it,
+//! producers can eventually stall when the ring buffer wraps.
 
 #![deny(rustdoc::broken_intra_doc_links)]
 #![warn(missing_docs)]
@@ -971,23 +978,26 @@ mod tests {
 	}
 
 	#[test]
-	fn spsc_diamond_topology_with_event_pollers() {
-		let builder = build_single_producer(8, factory(), BusySpin);
+	fn spsc_branch_from_producer_joined_after_multiple_stages() {
+		let mut builder = build_single_producer(8, factory(), BusySpin);
 
-		// A depends on producer.
-		let (mut ep_a, mut builder) = builder.event_poller();
-		let a_cursor = ep_a.cursor();
+		// J depends on producer (out-of-band).
+		let mut ep_j = builder.branch_poller();
 
-		// B is a branch that depends on A (out-of-band).
-		let mut ep_b = builder.branch_poller(a_cursor.clone());
+		// R1 depends on producer.
+		let (mut ep_r1, builder) = builder.event_poller();
 
-		// C depends on A via and_then (main chain).
+		// ME depends on R1.
 		let builder = builder.and_then();
-		let (mut ep_c, builder) = builder.event_poller();
+		let (mut ep_me, builder) = builder.event_poller();
 
-		// D joins C and B.
-		let builder = builder.and_then_joining(vec![ep_b.cursor()]);
-		let (mut ep_d, builder) = builder.event_poller();
+		// R2 depends on ME.
+		let builder = builder.and_then();
+		let (mut ep_r2, builder) = builder.event_poller();
+
+		// Report joins R2 and J.
+		let builder = builder.and_then_joining(vec![ep_j.cursor()]);
+		let (mut ep_report, builder) = builder.event_poller();
 
 		let mut producer = builder.build();
 
@@ -999,39 +1009,44 @@ mod tests {
 
 		let expected = vec![10, 20, 30];
 
-		// B, C, D are blocked until A advances.
-		assert_eq!(ep_b.poll().err(), Some(Polling::NoEvents));
-		assert_eq!(ep_c.poll().err(), Some(Polling::NoEvents));
-		assert_eq!(ep_d.poll().err(), Some(Polling::NoEvents));
+		// Downstream stages are blocked until upstream stages advance.
+		assert_eq!(ep_me.poll().err(), Some(Polling::NoEvents));
+		assert_eq!(ep_r2.poll().err(), Some(Polling::NoEvents));
+		assert_eq!(ep_report.poll().err(), Some(Polling::NoEvents));
 
-		// A sees events first.
+		// J is independent of R1/ME/R2.
 		{
-			let mut guard = ep_a.poll().unwrap();
+			let mut guard = ep_j.poll().unwrap();
 			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
 		}
+		// Still blocked because R2 hasn't advanced.
+		assert_eq!(ep_report.poll().err(), Some(Polling::NoEvents));
 
-		// B can proceed after A, but D is still blocked by C.
+		// Progress the main pipeline.
 		{
-			let mut guard = ep_b.poll().unwrap();
-			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
-		}
-		assert_eq!(ep_d.poll().err(), Some(Polling::NoEvents));
-
-		// C can proceed after A. Now D can proceed after both B and C.
-		{
-			let mut guard = ep_c.poll().unwrap();
+			let mut guard = ep_r1.poll().unwrap();
 			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
 		}
 		{
-			let mut guard = ep_d.poll().unwrap();
+			let mut guard = ep_me.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+		{
+			let mut guard = ep_r2.poll().unwrap();
 			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
 		}
 
-		// All pollers see shutdown after draining.
-		assert_eq!(ep_a.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_b.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_c.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_d.poll().err(), Some(Polling::Shutdown));
+		// Now report can proceed after both R2 and J.
+		{
+			let mut guard = ep_report.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+
+		assert_eq!(ep_j.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_r1.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_me.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_r2.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_report.poll().err(), Some(Polling::Shutdown));
 	}
 
 	#[test]
@@ -1041,7 +1056,7 @@ mod tests {
 		// A depends on producer.
 		let (mut ep_a, builder) = builder.event_poller();
 		// B depends on A via and_then_joining(vec![]) which should degrade to and_then().
-		let builder = builder.and_then_joining(vec![]);
+		let builder = builder.and_then_joining(Vec::<CursorHandle>::new());
 		let (mut ep_b, builder) = builder.event_poller();
 
 		let mut producer = builder.build();
@@ -1067,23 +1082,26 @@ mod tests {
 	}
 
 	#[test]
-	fn mpmc_diamond_topology_with_event_pollers() {
-		let builder = build_multi_producer(64, factory(), BusySpin);
+	fn mpmc_branch_from_producer_joined_after_multiple_stages() {
+		let mut builder = build_multi_producer(64, factory(), BusySpin);
 
-		// A depends on producer.
-		let (mut ep_a, mut builder) = builder.event_poller();
-		let a_cursor = ep_a.cursor();
+		// J depends on producer (out-of-band).
+		let mut ep_j = builder.branch_poller();
 
-		// B is a branch that depends on A (out-of-band).
-		let mut ep_b = builder.branch_poller(a_cursor.clone());
+		// R1 depends on producer.
+		let (mut ep_r1, builder) = builder.event_poller();
 
-		// C depends on A via and_then (main chain).
+		// ME depends on R1.
 		let builder = builder.and_then();
-		let (mut ep_c, builder) = builder.event_poller();
+		let (mut ep_me, builder) = builder.event_poller();
 
-		// D joins C and B.
-		let builder = builder.and_then_joining(vec![ep_b.cursor()]);
-		let (mut ep_d, builder) = builder.event_poller();
+		// R2 depends on ME.
+		let builder = builder.and_then();
+		let (mut ep_r2, builder) = builder.event_poller();
+
+		// Report joins R2 and J.
+		let builder = builder.and_then_joining(vec![ep_j.cursor()]);
+		let (mut ep_report, builder) = builder.event_poller();
 
 		let mut producer1 = builder.build();
 		let mut producer2 = producer1.clone();
@@ -1096,59 +1114,55 @@ mod tests {
 
 		let expected = HashSet::from([1, 2]);
 
-		// B, C, D are blocked until A advances.
-		assert_eq!(ep_b.poll().err(), Some(Polling::NoEvents));
-		assert_eq!(ep_c.poll().err(), Some(Polling::NoEvents));
-		assert_eq!(ep_d.poll().err(), Some(Polling::NoEvents));
+		// Downstream stages are blocked until upstream stages advance.
+		assert_eq!(ep_me.poll().err(), Some(Polling::NoEvents));
+		assert_eq!(ep_r2.poll().err(), Some(Polling::NoEvents));
+		assert_eq!(ep_report.poll().err(), Some(Polling::NoEvents));
 
-		// A sees events first.
+		// J is independent of R1/ME/R2.
 		{
-			let mut guard = ep_a.poll().unwrap();
+			let mut guard = ep_j.poll().unwrap();
 			assert_eq!(expected, guard.map(|e| e.num).collect::<HashSet<_>>());
 		}
+		// Still blocked because R2 hasn't advanced.
+		assert_eq!(ep_report.poll().err(), Some(Polling::NoEvents));
 
-		// B can proceed after A, but D is still blocked by C.
+		// Progress the main pipeline.
 		{
-			let mut guard = ep_b.poll().unwrap();
-			assert_eq!(expected, guard.map(|e| e.num).collect::<HashSet<_>>());
-		}
-		assert_eq!(ep_d.poll().err(), Some(Polling::NoEvents));
-
-		// C can proceed after A. Now D can proceed after both B and C.
-		{
-			let mut guard = ep_c.poll().unwrap();
+			let mut guard = ep_r1.poll().unwrap();
 			assert_eq!(expected, guard.map(|e| e.num).collect::<HashSet<_>>());
 		}
 		{
-			let mut guard = ep_d.poll().unwrap();
+			let mut guard = ep_me.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<HashSet<_>>());
+		}
+		{
+			let mut guard = ep_r2.poll().unwrap();
 			assert_eq!(expected, guard.map(|e| e.num).collect::<HashSet<_>>());
 		}
 
-		// All pollers see shutdown after draining.
-		assert_eq!(ep_a.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_b.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_c.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_d.poll().err(), Some(Polling::Shutdown));
+		// Now report can proceed after both R2 and J.
+		{
+			let mut guard = ep_report.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<HashSet<_>>());
+		}
+
+		assert_eq!(ep_j.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_r1.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_me.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_r2.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_report.poll().err(), Some(Polling::Shutdown));
 	}
 
 	#[test]
-	fn spsc_diamond_back_pressure_through_branch_poller() {
-		let builder = build_single_producer(4, factory(), BusySpin);
+	fn spsc_back_pressure_through_out_of_band_branch_poller() {
+		let mut builder = build_single_producer(4, factory(), BusySpin);
+
+		// J depends on producer (out-of-band).
+		let mut ep_j = builder.branch_poller();
 
 		// A depends on producer.
-		let (mut ep_a, mut builder) = builder.event_poller();
-		let a_cursor = ep_a.cursor();
-
-		// B is a branch that depends on A (out-of-band).
-		let mut ep_b = builder.branch_poller(a_cursor);
-
-		// C depends on A via and_then (main chain).
-		let builder = builder.and_then();
-		let (mut ep_c, builder) = builder.event_poller();
-
-		// D joins C and B.
-		let builder = builder.and_then_joining(vec![ep_b.cursor()]);
-		let (mut ep_d, builder) = builder.event_poller();
+		let (mut ep_a, builder) = builder.event_poller();
 
 		let mut producer = builder.build();
 
@@ -1160,30 +1174,17 @@ mod tests {
 		// Buffer full: no consumers have advanced yet.
 		assert_eq!(RingBufferFull, producer.try_publish(|e| e.num = 99).err().unwrap());
 
-		// Poll A → advances to sequence 3. B, C, D are still blocked.
+		// Poll A → advances to sequence 3, but J is still at -1.
 		{
 			let mut g = ep_a.poll().unwrap();
 			assert_eq!(vec![0, 1, 2, 3], g.map(|e| e.num).collect::<Vec<_>>());
 		}
-		// Still full because D can't advance yet (blocked by B and C).
+		// Still full because J is part of producer back-pressure.
 		assert_eq!(RingBufferFull, producer.try_publish(|e| e.num = 99).err().unwrap());
 
-		// Poll C → advances to 3. B still hasn't consumed, so D is still blocked.
+		// Poll J → advances to 3. Producer can now reclaim slots.
 		{
-			let mut g = ep_c.poll().unwrap();
-			assert_eq!(vec![0, 1, 2, 3], g.map(|e| e.num).collect::<Vec<_>>());
-		}
-		assert_eq!(RingBufferFull, producer.try_publish(|e| e.num = 99).err().unwrap());
-
-		// Poll B → advances to 3. Now D is unblocked.
-		{
-			let mut g = ep_b.poll().unwrap();
-			assert_eq!(vec![0, 1, 2, 3], g.map(|e| e.num).collect::<Vec<_>>());
-		}
-
-		// Poll D → advances to 3. Producer can now reclaim slots.
-		{
-			let mut g = ep_d.poll().unwrap();
+			let mut g = ep_j.poll().unwrap();
 			assert_eq!(vec![0, 1, 2, 3], g.map(|e| e.num).collect::<Vec<_>>());
 		}
 
@@ -1199,43 +1200,29 @@ mod tests {
 			assert_eq!(vec![100], g.map(|e| e.num).collect::<Vec<_>>());
 		}
 		{
-			let mut g = ep_b.poll().unwrap();
-			assert_eq!(vec![100], g.map(|e| e.num).collect::<Vec<_>>());
-		}
-		{
-			let mut g = ep_c.poll().unwrap();
-			assert_eq!(vec![100], g.map(|e| e.num).collect::<Vec<_>>());
-		}
-		{
-			let mut g = ep_d.poll().unwrap();
+			let mut g = ep_j.poll().unwrap();
 			assert_eq!(vec![100], g.map(|e| e.num).collect::<Vec<_>>());
 		}
 
 		assert_eq!(ep_a.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_b.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_c.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_d.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_j.poll().err(), Some(Polling::Shutdown));
 	}
 
 	#[test]
 	fn spsc_triple_branch_fan_out_and_join() {
-		let builder = build_single_producer(8, factory(), BusySpin);
+		let mut builder = build_single_producer(8, factory(), BusySpin);
+
+		// Branch out from the producer.
+		let mut ep_j1 = builder.branch_poller();
+		let mut ep_j2 = builder.branch_poller();
+		let mut ep_j3 = builder.branch_poller();
 
 		// A depends on producer.
-		let (mut ep_a, mut builder) = builder.event_poller();
-		let a_cursor = ep_a.cursor();
+		let (mut ep_a, builder) = builder.event_poller();
 
-		// B and C are branches that depend on A.
-		let mut ep_b = builder.branch_poller(Arc::clone(&a_cursor));
-		let mut ep_c = builder.branch_poller(a_cursor);
-
-		// D depends on A via and_then (main chain).
-		let builder = builder.and_then();
-		let (mut ep_d, builder) = builder.event_poller();
-
-		// E joins D, B, and C.
-		let builder = builder.and_then_joining(vec![ep_b.cursor(), ep_c.cursor()]);
-		let (mut ep_e, builder) = builder.event_poller();
+		// Report joins A and J1/J2/J3.
+		let builder = builder.and_then_joining(vec![ep_j1.cursor(), ep_j2.cursor(), ep_j3.cursor()]);
+		let (mut ep_report, builder) = builder.event_poller();
 
 		let mut producer = builder.build();
 
@@ -1247,44 +1234,37 @@ mod tests {
 
 		let expected = vec![1, 2, 3];
 
-		// Downstream pollers blocked until A advances.
-		assert_eq!(ep_b.poll().err(), Some(Polling::NoEvents));
-		assert_eq!(ep_c.poll().err(), Some(Polling::NoEvents));
-		assert_eq!(ep_d.poll().err(), Some(Polling::NoEvents));
-		assert_eq!(ep_e.poll().err(), Some(Polling::NoEvents));
+		// Report is blocked until A and all branches advance.
+		assert_eq!(ep_report.poll().err(), Some(Polling::NoEvents));
 
-		// A sees events first.
 		{
 			let mut g = ep_a.poll().unwrap();
 			assert_eq!(expected, g.map(|e| e.num).collect::<Vec<_>>());
 		}
-
-		// Consume D + one branch: E still blocked.
 		{
-			let mut g = ep_d.poll().unwrap();
+			let mut g = ep_j1.poll().unwrap();
 			assert_eq!(expected, g.map(|e| e.num).collect::<Vec<_>>());
 		}
 		{
-			let mut g = ep_b.poll().unwrap();
+			let mut g = ep_j2.poll().unwrap();
 			assert_eq!(expected, g.map(|e| e.num).collect::<Vec<_>>());
 		}
-		assert_eq!(ep_e.poll().err(), Some(Polling::NoEvents));
-
-		// Consume last branch: E unblocks.
+		// Still blocked on J3.
+		assert_eq!(ep_report.poll().err(), Some(Polling::NoEvents));
 		{
-			let mut g = ep_c.poll().unwrap();
+			let mut g = ep_j3.poll().unwrap();
 			assert_eq!(expected, g.map(|e| e.num).collect::<Vec<_>>());
 		}
 		{
-			let mut g = ep_e.poll().unwrap();
+			let mut g = ep_report.poll().unwrap();
 			assert_eq!(expected, g.map(|e| e.num).collect::<Vec<_>>());
 		}
 
 		assert_eq!(ep_a.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_b.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_c.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_d.poll().err(), Some(Polling::Shutdown));
-		assert_eq!(ep_e.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_j1.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_j2.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_j3.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_report.poll().err(), Some(Polling::Shutdown));
 	}
 
 	#[test]

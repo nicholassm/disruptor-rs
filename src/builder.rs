@@ -195,6 +195,7 @@ pub struct Shared<E, W> {
 	pub(crate) shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
 	pub(crate) ring_buffer:          Arc<RingBuffer<E>>,
 	pub(crate) consumers:            Vec<Consumer>,
+	pub(crate) producer_gating_cursors: Vec<Arc<Cursor>>,
 	current_consumer_cursors:        Option<Vec<Arc<Cursor>>>,
 	pub(crate) wait_strategy:        W,
 	pub(crate) thread_context:       ThreadContext,
@@ -215,8 +216,13 @@ impl <E, W> Shared<E, W> {
 			shutdown_at_sequence,
 			current_consumer_cursors,
 			consumers: vec![],
+			producer_gating_cursors: vec![],
 			thread_context: ThreadContext::default(),
 		}
+	}
+
+	pub(crate) fn add_producer_gating_cursor(&mut self, cursor: Arc<Cursor>) {
+		self.producer_gating_cursors.push(cursor);
 	}
 
 	fn add_consumer_and_cursor(&mut self, consumer: Consumer, cursor: Arc<Cursor>) {

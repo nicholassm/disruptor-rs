@@ -1,7 +1,7 @@
 use std::{sync::{atomic::{fence, AtomicI64, Ordering}, Arc}};
 use crossbeam_utils::CachePadded;
 use thiserror::Error;
-use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
+use crate::{cursor::{Cursor, CursorHandle}, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 
 /// Represents an EventPoller that can be used to poll events from the ring buffer.
 /// Use the EventPoller when you want to control your own thread
@@ -132,12 +132,12 @@ where
 		}
 	}
 
-	/// Returns a clone of this poller's cursor.
+	/// Returns a clone of this poller's cursor handle.
 	///
-	/// Used to wire diamond/DAG topologies where downstream consumers or join barriers
+	/// Used to wire DAG topologies where downstream consumers or join barriers
 	/// (e.g. `and_then_joining`) need to track this consumer's progress.
-	pub fn cursor(&self) -> Arc<Cursor> {
-		Arc::clone(&self.cursor)
+	pub fn cursor(&self) -> CursorHandle {
+		CursorHandle(Arc::clone(&self.cursor))
 	}
 
 	/// Polls the ring buffer and returns an [`EventGuard`] if any events are available.

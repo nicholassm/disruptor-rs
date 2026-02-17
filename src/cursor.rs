@@ -1,9 +1,16 @@
-use std::sync::atomic::{AtomicI64, Ordering};
 use crossbeam_utils::CachePadded;
+use std::sync::{
+	atomic::{AtomicI64, Ordering},
+	Arc,
+};
 
 use crate::Sequence;
 
-/// Opaque cursor used to coordinate dependencies between [`EventPoller`](crate::EventPoller)s.
+pub(crate) struct Cursor {
+	counter: CachePadded<AtomicI64>
+}
+
+/// Opaque cursor handle used to coordinate dependencies between consumers.
 ///
 /// This type is primarily intended to be passed between topology-building APIs such as
 /// [`SPBuilder::branch_poller`](crate::builder::single::SPBuilder::branch_poller),
@@ -11,10 +18,9 @@ use crate::Sequence;
 /// [`SPBuilder::and_then_joining`](crate::builder::single::SPBuilder::and_then_joining) /
 /// [`MPBuilder::and_then_joining`](crate::builder::multi::MPBuilder::and_then_joining).
 ///
-/// Obtain a cursor via [`EventPoller::cursor`](crate::EventPoller::cursor).
-pub struct Cursor {
-	counter: CachePadded<AtomicI64>
-}
+/// Obtain a cursor handle via [`EventPoller::cursor`](crate::EventPoller::cursor).
+#[derive(Clone)]
+pub struct CursorHandle(pub(crate) Arc<Cursor>);
 
 impl Cursor {
 	pub(crate) fn new(start_value: i64) -> Self {

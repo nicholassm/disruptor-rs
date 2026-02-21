@@ -288,6 +288,12 @@
 //! [`MPBuilder::and_then_joining`](builder::multi::MPBuilder::and_then_joining) to join it into the
 //! downstream dependency chain.
 //!
+//! You can also create a "managed" branch consumer (event handler) using
+//! [`SPBuilder::branch_handle_events_with`](builder::single::SPBuilder::branch_handle_events_with) /
+//! [`MPBuilder::branch_handle_events_with`](builder::multi::MPBuilder::branch_handle_events_with).
+//! These methods return a [`BranchJoinHandle`] that can be joined later via
+//! `and_then_joining(vec![join_handle.into()])`.
+//!
 //! Note: A branch poller participates in producer back-pressure. If you create one and never poll it,
 //! producers can eventually stall when the ring buffer wraps.
 

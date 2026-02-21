@@ -320,6 +320,7 @@ mod tests {
 	use std::cell::RefCell;
 	use std::collections::HashSet;
 	use std::sync::atomic::AtomicBool;
+	use std::sync::atomic::AtomicI64;
 	use std::sync::atomic::Ordering::Relaxed;
 	use std::sync::{mpsc, Arc};
 	use std::thread;
@@ -1131,6 +1132,89 @@ mod tests {
 			std::hint::spin_loop();
 		}
 		assert!(b_processed.load(Relaxed), "branch processor should finish");
+
+		// Now report can proceed after both R2 and B.
+		{
+			let mut guard = ep_report.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+
+		drop(producer);
+
+		assert_eq!(ep_r1.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_me.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_r2.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_report.poll().err(), Some(Polling::Shutdown));
+	}
+
+	#[test]
+	fn spsc_branch_processor_with_state_joined_after_multiple_stages() {
+		let mut builder = build_single_producer(8, factory(), BusySpin);
+
+		let allow_b     = Arc::new(AtomicBool::new(false));
+		let state_seen  = Arc::new(AtomicI64::new(0));
+		let b_processed = Arc::new(AtomicBool::new(false));
+
+		let b_join = {
+			let allow_b     = Arc::clone(&allow_b);
+			let state_seen  = Arc::clone(&state_seen);
+			let b_processed = Arc::clone(&b_processed);
+			builder.branch_handle_events_and_state_with(
+				move |state: &mut i64, _e: &Event, _, _| {
+					*state += 1;
+					while !allow_b.load(Relaxed) { std::hint::spin_loop(); }
+					state_seen.store(*state, Relaxed);
+					b_processed.store(true, Relaxed);
+				},
+				|| 0_i64
+			)
+		};
+
+		// R1 depends on producer.
+		let (mut ep_r1, builder) = builder.event_poller();
+		// ME depends on R1.
+		let builder = builder.and_then();
+		let (mut ep_me, builder) = builder.event_poller();
+		// R2 depends on ME.
+		let builder = builder.and_then();
+		let (mut ep_r2, builder) = builder.event_poller();
+
+		// Report joins R2 and B.
+		let builder = builder.and_then_joining(vec![b_join.into()]);
+		let (mut ep_report, builder) = builder.event_poller();
+
+		let mut producer = builder.build();
+		let _unblock = UnblockOnDrop(Arc::clone(&allow_b));
+
+		producer.publish(|e| { e.num = 1; });
+
+		let expected = vec![1];
+
+		// Progress the main pipeline.
+		{
+			let mut guard = ep_r1.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+		{
+			let mut guard = ep_me.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+		{
+			let mut guard = ep_r2.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+
+		// Report is blocked on B.
+		assert_eq!(ep_report.poll().err(), Some(Polling::NoEvents));
+
+		// Unblock B and wait for it to finish.
+		allow_b.store(true, Relaxed);
+		for _ in 0..1_000_000 {
+			if b_processed.load(Relaxed) { break; }
+			std::hint::spin_loop();
+		}
+		assert!(b_processed.load(Relaxed), "branch processor should finish");
+		assert_eq!(state_seen.load(Relaxed), 1);
 
 		// Now report can proceed after both R2 and B.
 		{

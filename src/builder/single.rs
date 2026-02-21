@@ -4,7 +4,7 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
-use crate::{barrier::Barrier, builder::ProcessorSettings, consumer::{event_poller::{BranchPoller, EventPoller}, MultiConsumerBarrier, SingleConsumerBarrier}, cursor::{BranchJoinHandle, Cursor, CursorHandle}, producer::single::{SingleProducer, SingleProducerBarrier}, wait_strategies::WaitStrategy, Sequence};
+use crate::{barrier::Barrier, builder::ProcessorSettings, consumer::{event_poller::{BranchPoller, EventPoller}, start_processor, start_processor_with_state, MultiConsumerBarrier, SingleConsumerBarrier}, cursor::{BranchJoinHandle, Cursor, CursorHandle}, producer::single::{SingleProducer, SingleProducerBarrier}, wait_strategies::WaitStrategy, Sequence};
 
 use super::{Builder, Shared, MC, NC, SC};
 
@@ -47,6 +47,41 @@ where
 			Arc::clone(&self.shared.shutdown_at_sequence),
 			Arc::clone(&cursor));
 		BranchPoller::new(poller, BranchJoinHandle(cursor))
+	}
+}
+
+impl<E, W, B, S> SPBuilder<S, E, W, B>
+where
+	E: 'static + Send + Sync,
+	W: 'static + WaitStrategy,
+	B: 'static + Barrier,
+{
+	/// Create an out-of-band processor that depends on the current barrier.
+	///
+	/// Like [`branch_poller`](Self::branch_poller), this is intended for wiring DAG topologies where
+	/// a branch runs in parallel with multiple stages and is only joined back later.
+	///
+	/// Returns a join handle that can be moved into [`and_then_joining`](Self::and_then_joining).
+	pub fn branch_handle_events_with<EH>(&mut self, event_handler: EH) -> BranchJoinHandle
+	where
+		EH: 'static + Send + FnMut(&E, Sequence, bool),
+	{
+		let barrier            = Arc::clone(&self.dependent_barrier);
+		let (cursor, consumer) = start_processor(event_handler, &mut self.shared, barrier);
+		self.shared.add_branch_consumer_and_cursor(consumer, Arc::clone(&cursor));
+		BranchJoinHandle(cursor)
+	}
+
+	/// Like [`branch_handle_events_with`](Self::branch_handle_events_with), but with state.
+	pub fn branch_handle_events_and_state_with<EH, S2, IS>(&mut self, event_handler: EH, initialize_state: IS) -> BranchJoinHandle
+	where
+		EH: 'static + Send + FnMut(&mut S2, &E, Sequence, bool),
+		IS: 'static + Send + FnOnce() -> S2,
+	{
+		let barrier            = Arc::clone(&self.dependent_barrier);
+		let (cursor, consumer) = start_processor_with_state(event_handler, &mut self.shared, barrier, initialize_state);
+		self.shared.add_branch_consumer_and_cursor(consumer, Arc::clone(&cursor));
+		BranchJoinHandle(cursor)
 	}
 }
 

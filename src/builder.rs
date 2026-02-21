@@ -225,6 +225,11 @@ impl <E, W> Shared<E, W> {
 		self.producer_gating_cursors.push(cursor);
 	}
 
+	pub(crate) fn add_branch_consumer_and_cursor(&mut self, consumer: Consumer, cursor: Arc<Cursor>) {
+		self.consumers.push(consumer);
+		self.add_producer_gating_cursor(cursor);
+	}
+
 	fn add_consumer_and_cursor(&mut self, consumer: Consumer, cursor: Arc<Cursor>) {
 		self.consumers.push(consumer);
 		self.add_cursor(cursor);

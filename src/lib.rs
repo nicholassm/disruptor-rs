@@ -335,6 +335,14 @@ mod tests {
 		|| Event { num: -1 }
 	}
 
+	struct UnblockOnDrop(Arc<AtomicBool>);
+
+	impl Drop for UnblockOnDrop {
+		fn drop(&mut self) {
+			self.0.store(true, Relaxed);
+		}
+	}
+
 	#[test]
 	#[should_panic(expected = "Size must be power of 2.")]
 	fn size_not_a_factor_of_2() {
@@ -1045,6 +1053,180 @@ mod tests {
 		}
 
 		assert_eq!(ep_j.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_r1.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_me.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_r2.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_report.poll().err(), Some(Polling::Shutdown));
+	}
+
+	#[test]
+	fn spsc_branch_processor_joined_after_multiple_stages() {
+		let mut builder = build_single_producer(8, factory(), BusySpin);
+
+		let allow_b     = Arc::new(AtomicBool::new(false));
+		let b_started   = Arc::new(AtomicBool::new(false));
+		let b_processed = Arc::new(AtomicBool::new(false));
+
+		let b_join = {
+			let allow_b     = Arc::clone(&allow_b);
+			let b_started   = Arc::clone(&b_started);
+			let b_processed = Arc::clone(&b_processed);
+			builder.branch_handle_events_with(move |_e: &Event, _, _| {
+				b_started.store(true, Relaxed);
+				while !allow_b.load(Relaxed) { std::hint::spin_loop(); }
+				b_processed.store(true, Relaxed);
+			})
+		};
+
+		// R1 depends on producer.
+		let (mut ep_r1, builder) = builder.event_poller();
+
+		// ME depends on R1.
+		let builder = builder.and_then();
+		let (mut ep_me, builder) = builder.event_poller();
+
+		// R2 depends on ME.
+		let builder = builder.and_then();
+		let (mut ep_r2, builder) = builder.event_poller();
+
+		// Report joins R2 and B.
+		let builder = builder.and_then_joining(vec![b_join.into()]);
+		let (mut ep_report, builder) = builder.event_poller();
+
+		let mut producer = builder.build();
+		let _unblock = UnblockOnDrop(Arc::clone(&allow_b));
+
+		producer.publish(|e| { e.num = 1; });
+
+		let expected = vec![1];
+
+		// Progress the main pipeline.
+		{
+			let mut guard = ep_r1.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+		{
+			let mut guard = ep_me.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+		{
+			let mut guard = ep_r2.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+
+		// Wait until B has started processing (and is blocked).
+		for _ in 0..1_000_000 {
+			if b_started.load(Relaxed) { break; }
+			std::hint::spin_loop();
+		}
+		assert!(b_started.load(Relaxed), "branch processor should start");
+
+		// Report is blocked on B.
+		assert_eq!(ep_report.poll().err(), Some(Polling::NoEvents));
+
+		// Unblock B and wait for it to finish.
+		allow_b.store(true, Relaxed);
+		for _ in 0..1_000_000 {
+			if b_processed.load(Relaxed) { break; }
+			std::hint::spin_loop();
+		}
+		assert!(b_processed.load(Relaxed), "branch processor should finish");
+
+		// Now report can proceed after both R2 and B.
+		{
+			let mut guard = ep_report.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+
+		drop(producer);
+
+		assert_eq!(ep_r1.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_me.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_r2.poll().err(), Some(Polling::Shutdown));
+		assert_eq!(ep_report.poll().err(), Some(Polling::Shutdown));
+	}
+
+	#[test]
+	fn mpmc_branch_processor_joined_after_multiple_stages() {
+		let mut builder = build_multi_producer(64, factory(), BusySpin);
+
+		let allow_b     = Arc::new(AtomicBool::new(false));
+		let b_started   = Arc::new(AtomicBool::new(false));
+		let b_processed = Arc::new(AtomicBool::new(false));
+
+		let b_join = {
+			let allow_b     = Arc::clone(&allow_b);
+			let b_started   = Arc::clone(&b_started);
+			let b_processed = Arc::clone(&b_processed);
+			builder.branch_handle_events_with(move |_e: &Event, _, _| {
+				b_started.store(true, Relaxed);
+				while !allow_b.load(Relaxed) { std::hint::spin_loop(); }
+				b_processed.store(true, Relaxed);
+			})
+		};
+
+		// R1 depends on producer.
+		let (mut ep_r1, builder) = builder.event_poller();
+
+		// ME depends on R1.
+		let builder = builder.and_then();
+		let (mut ep_me, builder) = builder.event_poller();
+
+		// R2 depends on ME.
+		let builder = builder.and_then();
+		let (mut ep_r2, builder) = builder.event_poller();
+
+		// Report joins R2 and B.
+		let builder = builder.and_then_joining(vec![b_join.into()]);
+		let (mut ep_report, builder) = builder.event_poller();
+
+		let mut producer = builder.build();
+		let _unblock = UnblockOnDrop(Arc::clone(&allow_b));
+
+		producer.publish(|e| { e.num = 1; });
+
+		let expected = vec![1];
+
+		// Progress the main pipeline.
+		{
+			let mut guard = ep_r1.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+		{
+			let mut guard = ep_me.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+		{
+			let mut guard = ep_r2.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+
+		// Wait until B has started processing (and is blocked).
+		for _ in 0..1_000_000 {
+			if b_started.load(Relaxed) { break; }
+			std::hint::spin_loop();
+		}
+		assert!(b_started.load(Relaxed), "branch processor should start");
+
+		// Report is blocked on B.
+		assert_eq!(ep_report.poll().err(), Some(Polling::NoEvents));
+
+		// Unblock B and wait for it to finish.
+		allow_b.store(true, Relaxed);
+		for _ in 0..1_000_000 {
+			if b_processed.load(Relaxed) { break; }
+			std::hint::spin_loop();
+		}
+		assert!(b_processed.load(Relaxed), "branch processor should finish");
+
+		// Now report can proceed after both R2 and B.
+		{
+			let mut guard = ep_report.poll().unwrap();
+			assert_eq!(expected, guard.map(|e| e.num).collect::<Vec<_>>());
+		}
+
+		drop(producer);
+
 		assert_eq!(ep_r1.poll().err(), Some(Polling::Shutdown));
 		assert_eq!(ep_me.poll().err(), Some(Polling::Shutdown));
 		assert_eq!(ep_r2.poll().err(), Some(Polling::Shutdown));

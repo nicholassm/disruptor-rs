@@ -22,6 +22,20 @@ pub(crate) struct Cursor {
 #[derive(Clone)]
 pub struct CursorHandle(pub(crate) Arc<Cursor>);
 
+/// Non-cloneable cursor handle for branch consumers/pollers.
+///
+/// This is primarily intended to be moved into APIs like
+/// [`SPBuilder::and_then_joining`](crate::builder::single::SPBuilder::and_then_joining) /
+/// [`MPBuilder::and_then_joining`](crate::builder::multi::MPBuilder::and_then_joining).
+#[must_use = "Dropping a branch join handle means the branch will not be joined into any downstream barrier."]
+pub struct BranchJoinHandle(pub(crate) Arc<Cursor>);
+
+impl From<BranchJoinHandle> for CursorHandle {
+	fn from(value: BranchJoinHandle) -> Self {
+		CursorHandle(value.0)
+	}
+}
+
 impl Cursor {
 	pub(crate) fn new(start_value: i64) -> Self {
 		Self {

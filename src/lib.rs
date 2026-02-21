@@ -283,7 +283,8 @@
 //!
 //! Use [`SPBuilder::branch_poller`](builder::single::SPBuilder::branch_poller) /
 //! [`MPBuilder::branch_poller`](builder::multi::MPBuilder::branch_poller) to create a branch poller,
-//! and [`SPBuilder::and_then_joining`](builder::single::SPBuilder::and_then_joining) /
+//! take its join handle via [`BranchPoller::join_handle`], and then use
+//! [`SPBuilder::and_then_joining`](builder::single::SPBuilder::and_then_joining) /
 //! [`MPBuilder::and_then_joining`](builder::multi::MPBuilder::and_then_joining) to join it into the
 //! downstream dependency chain.
 //!
@@ -306,12 +307,12 @@ mod ringbuffer;
 mod producer;
 
 pub use crate::builder::{build_single_producer, build_multi_producer, ProcessorSettings};
-pub use crate::cursor::CursorHandle;
+pub use crate::cursor::{BranchJoinHandle, CursorHandle};
 pub use crate::producer::{Producer, RingBufferFull, MissingFreeSlots};
 pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
 pub use crate::producer::{single::{SingleProducer, SingleProducerBarrier}, multi::{MultiProducer,  MultiProducerBarrier}};
 pub use crate::consumer::{SingleConsumerBarrier, MultiConsumerBarrier};
-pub use crate::consumer::event_poller::{EventPoller, Polling, EventGuard};
+pub use crate::consumer::event_poller::{BranchPoller, EventPoller, Polling, EventGuard};
 
 #[cfg(test)]
 mod tests {
@@ -996,7 +997,8 @@ mod tests {
 		let (mut ep_r2, builder) = builder.event_poller();
 
 		// Report joins R2 and J.
-		let builder = builder.and_then_joining(vec![ep_j.cursor()]);
+		let j = ep_j.join_handle();
+		let builder = builder.and_then_joining(vec![j.into()]);
 		let (mut ep_report, builder) = builder.event_poller();
 
 		let mut producer = builder.build();
@@ -1100,7 +1102,8 @@ mod tests {
 		let (mut ep_r2, builder) = builder.event_poller();
 
 		// Report joins R2 and J.
-		let builder = builder.and_then_joining(vec![ep_j.cursor()]);
+		let j = ep_j.join_handle();
+		let builder = builder.and_then_joining(vec![j.into()]);
 		let (mut ep_report, builder) = builder.event_poller();
 
 		let mut producer1 = builder.build();
@@ -1221,7 +1224,10 @@ mod tests {
 		let (mut ep_a, builder) = builder.event_poller();
 
 		// Report joins A and J1/J2/J3.
-		let builder = builder.and_then_joining(vec![ep_j1.cursor(), ep_j2.cursor(), ep_j3.cursor()]);
+		let j1 = ep_j1.join_handle();
+		let j2 = ep_j2.join_handle();
+		let j3 = ep_j3.join_handle();
+		let builder = builder.and_then_joining(vec![j1.into(), j2.into(), j3.into()]);
 		let (mut ep_report, builder) = builder.event_poller();
 
 		let mut producer = builder.build();

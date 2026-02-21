@@ -4,7 +4,7 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
-use crate::{barrier::Barrier, builder::ProcessorSettings, consumer::{event_poller::EventPoller, MultiConsumerBarrier, SingleConsumerBarrier}, cursor::{Cursor, CursorHandle}, producer::multi::{MultiProducer, MultiProducerBarrier}, wait_strategies::WaitStrategy, Sequence};
+use crate::{barrier::Barrier, builder::ProcessorSettings, consumer::{event_poller::{BranchPoller, EventPoller}, MultiConsumerBarrier, SingleConsumerBarrier}, cursor::{BranchJoinHandle, Cursor, CursorHandle}, producer::multi::{MultiProducer, MultiProducerBarrier}, wait_strategies::WaitStrategy, Sequence};
 
 use super::{Builder, Shared, MC, NC, SC};
 
@@ -31,20 +31,22 @@ where
 	///
 	/// This is intended for building DAG topologies where a branch runs in parallel with multiple
 	/// stages, and is only joined back at a later point (use [`and_then_joining`](Self::and_then_joining)).
+	/// Use [`BranchPoller::join_handle`] to obtain a handle that can be joined downstream.
 	///
 	/// This poller participates in producer back-pressure, but does not affect the builder's
 	/// dependency chain unless it is explicitly joined.
 	///
 	/// Note: Dropping the returned poller without advancing it can cause producers to eventually
 	/// stall when the ring buffer wraps, since it participates in producer back-pressure.
-	pub fn branch_poller(&mut self) -> EventPoller<E, B> {
+	pub fn branch_poller(&mut self) -> BranchPoller<E, B> {
 		let cursor = Arc::new(Cursor::new(-1));
 		self.shared.add_producer_gating_cursor(Arc::clone(&cursor));
-		EventPoller::new(
+		let poller = EventPoller::new(
 			Arc::clone(&self.shared.ring_buffer),
 			Arc::clone(&self.dependent_barrier),
 			Arc::clone(&self.shared.shutdown_at_sequence),
-			cursor)
+			Arc::clone(&cursor));
+		BranchPoller::new(poller, BranchJoinHandle(cursor))
 	}
 }
 

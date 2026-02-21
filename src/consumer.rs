@@ -22,7 +22,7 @@ impl Consumer {
 	}
 }
 
-/// Barrier tracking (typically) a single consumer.
+/// Barrier tracking the minimum sequence of one or more consumers (usually one).
 pub struct SingleConsumerBarrier {
 	cursors: Vec<Arc<Cursor>>,
 }

@@ -22,9 +22,9 @@ impl Consumer {
 	}
 }
 
-/// Barrier tracking the minimum sequence of one or more consumers (usually one).
+/// Barrier tracking a single consumer.
 pub struct SingleConsumerBarrier {
-	cursors: Vec<Arc<Cursor>>,
+	cursor: Arc<Cursor>
 }
 
 /// Barrier tracking the minimum sequence of a group of consumers.
@@ -35,23 +35,15 @@ pub struct MultiConsumerBarrier {
 impl SingleConsumerBarrier {
 	pub(crate) fn new(cursor: Arc<Cursor>) -> Self {
 		Self {
-			cursors: vec![cursor],
+			cursor
 		}
-	}
-
-	pub(crate) fn new_many(cursors: Vec<Arc<Cursor>>) -> Self {
-		assert!(!cursors.is_empty(), "SingleConsumerBarrier must have at least one cursor.");
-		Self { cursors }
 	}
 }
 
 impl Barrier for SingleConsumerBarrier {
 	#[inline]
 	fn get_after(&self, _lower_bound: Sequence) -> Sequence {
-		self.cursors.iter().fold(i64::MAX, |min_sequence, cursor| {
-			let sequence = cursor.relaxed_value();
-			std::cmp::min(sequence, min_sequence)
-		})
+		self.cursor.relaxed_value()
 	}
 }
 

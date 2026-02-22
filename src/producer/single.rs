@@ -2,6 +2,7 @@ use std::sync::atomic::{fence, Ordering};
 use crate::{barrier::{Barrier, NONE}, cursor::Cursor, producer::ProducerBarrier};
 use crossbeam_utils::CachePadded;
 use crate::{consumer::Consumer, ringbuffer::RingBuffer, Sequence};
+use std::sync::{Arc, atomic::AtomicI64};
 use super::*;
 
 /// Producer for publishing to the Disruptor from a single thread.
@@ -14,6 +15,7 @@ pub struct SingleProducer<E, C> {
 	producer_barrier:            Arc<SingleProducerBarrier>,
 	consumers:                   Vec<Consumer>,
 	consumer_barrier:            C,
+	extra_gating_cursors:        Vec<Arc<Cursor>>,
 	/// Next sequence to be published.
 	sequence:                    Sequence,
 	/// Highest sequence available for publication because the Consumers are "enough" behind
@@ -76,6 +78,7 @@ where
 		producer_barrier:     Arc<SingleProducerBarrier>,
 		consumers:            Vec<Consumer>,
 		consumer_barrier:     C,
+		extra_gating_cursors: Vec<Arc<Cursor>>,
 	) -> Self
 	{
 		let sequence_clear_of_consumers = ring_buffer.size() - 1;
@@ -85,6 +88,7 @@ where
 			producer_barrier,
 			consumers,
 			consumer_barrier,
+			extra_gating_cursors,
 			sequence: 0,
 			sequence_clear_of_consumers,
 		}
@@ -100,7 +104,11 @@ where
 			// which is still being read.
 			// (The slowest consumer is too far behind the producer to publish next n events).
 			let last_published     = self.sequence - 1;
-			let rear_sequence_read = self.consumer_barrier.get_after(last_published);
+			let mut rear_sequence_read = self.consumer_barrier.get_after(last_published);
+			for cursor in &self.extra_gating_cursors {
+				let sequence = cursor.relaxed_value();
+				rear_sequence_read = std::cmp::min(rear_sequence_read, sequence);
+			}
 			let free_slots         = self.ring_buffer.free_slots(last_published, rear_sequence_read);
 			if free_slots < n {
 				return Err(MissingFreeSlots((n - free_slots) as u64));

@@ -167,21 +167,16 @@ where
 	/// Finish the build and get a [`SingleProducer`].
 	pub fn build(mut self) -> SingleProducer<E, SingleConsumerBarrier> {
 		let mut consumer_cursors = self.shared().current_consumer_cursors.take().unwrap();
-		let mut producer_gating_cursors = std::mem::take(&mut self.shared.producer_gating_cursors);
+		let producer_gating_cursors = std::mem::take(&mut self.shared.producer_gating_cursors);
 		// Guaranteed to be present by construction.
-		let consumer_cursor      = consumer_cursors.remove(0);
-		let consumer_barrier     = if producer_gating_cursors.is_empty() {
-			SingleConsumerBarrier::new(consumer_cursor)
-		} else {
-			producer_gating_cursors.push(consumer_cursor);
-			SingleConsumerBarrier::new_many(producer_gating_cursors)
-		};
+		let consumer_barrier     = SingleConsumerBarrier::new(consumer_cursors.remove(0));
 		SingleProducer::new(
 			self.shared.shutdown_at_sequence,
 			self.shared.ring_buffer,
 			self.producer_barrier,
 			self.shared.consumers,
-		consumer_barrier)
+			consumer_barrier,
+			producer_gating_cursors)
 	}
 
 	/// Get an EventPoller.
@@ -339,6 +334,7 @@ where
 			self.shared.ring_buffer,
 			self.producer_barrier,
 			self.shared.consumers,
-			consumer_barrier)
+			consumer_barrier,
+			vec![])
 	}
 }

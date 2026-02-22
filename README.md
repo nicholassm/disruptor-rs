@@ -21,6 +21,7 @@ Use it when you want to trade CPU resources for lower latency and higher through
 - [Correctness](#correctness)
 - [Performance](#performance)
 - [Related Work](#related-work)
+- [Used By](#used-by)
 - [Contributions](#contributions)
 - [Roadmap](#roadmap)
 
@@ -422,6 +423,10 @@ There are multiple other Rust projects that mimic the LMAX Disruptor library:
 2. [Disrustor](https://github.com/sklose/disrustor)
 
 A key feature that this library supports is multiple producers from different threads that neither of the above libraries support (at the time of writing).
+
+# Used By
+
+*Would you like to have your company listed here? Open an issue with the details and I'll add you to the list.*
 
 # Contributions
 

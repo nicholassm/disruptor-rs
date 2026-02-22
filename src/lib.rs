@@ -998,7 +998,7 @@ mod tests {
 		let mut builder = build_single_producer(8, factory(), BusySpin);
 
 		// J depends on producer (out-of-band).
-		let mut ep_j = builder.branch_poller();
+		let (j, mut ep_j) = builder.branch_poller().join_handle();
 
 		// R1 depends on producer.
 		let (mut ep_r1, builder) = builder.event_poller();
@@ -1012,7 +1012,6 @@ mod tests {
 		let (mut ep_r2, builder) = builder.event_poller();
 
 		// Report joins R2 and J.
-		let j = ep_j.join_handle();
 		let builder = builder.and_then_joining(vec![j.into()]);
 		let (mut ep_report, builder) = builder.event_poller();
 
@@ -1360,7 +1359,7 @@ mod tests {
 		let mut builder = build_multi_producer(64, factory(), BusySpin);
 
 		// J depends on producer (out-of-band).
-		let mut ep_j = builder.branch_poller();
+		let (j, mut ep_j) = builder.branch_poller().join_handle();
 
 		// R1 depends on producer.
 		let (mut ep_r1, builder) = builder.event_poller();
@@ -1374,7 +1373,6 @@ mod tests {
 		let (mut ep_r2, builder) = builder.event_poller();
 
 		// Report joins R2 and J.
-		let j = ep_j.join_handle();
 		let builder = builder.and_then_joining(vec![j.into()]);
 		let (mut ep_report, builder) = builder.event_poller();
 
@@ -1434,7 +1432,7 @@ mod tests {
 		let mut builder = build_single_producer(4, factory(), BusySpin);
 
 		// J depends on producer (out-of-band).
-		let mut ep_j = builder.branch_poller();
+		let (_j, mut ep_j) = builder.branch_poller().join_handle();
 
 		// A depends on producer.
 		let (mut ep_a, builder) = builder.event_poller();
@@ -1488,17 +1486,14 @@ mod tests {
 		let mut builder = build_single_producer(8, factory(), BusySpin);
 
 		// Branch out from the producer.
-		let mut ep_j1 = builder.branch_poller();
-		let mut ep_j2 = builder.branch_poller();
-		let mut ep_j3 = builder.branch_poller();
+		let (j1, mut ep_j1) = builder.branch_poller().join_handle();
+		let (j2, mut ep_j2) = builder.branch_poller().join_handle();
+		let (j3, mut ep_j3) = builder.branch_poller().join_handle();
 
 		// A depends on producer.
 		let (mut ep_a, builder) = builder.event_poller();
 
 		// Report joins A and J1/J2/J3.
-		let j1 = ep_j1.join_handle();
-		let j2 = ep_j2.join_handle();
-		let j3 = ep_j3.join_handle();
 		let builder = builder.and_then_joining(vec![j1.into(), j2.into(), j3.into()]);
 		let (mut ep_report, builder) = builder.event_poller();
 

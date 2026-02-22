@@ -64,7 +64,7 @@ pub struct EventPoller<E, B> {
 #[must_use = "A branch poller participates in producer back-pressure. Dropping it without polling can cause producers to stall."]
 pub struct BranchPoller<E, B> {
 	poller:      EventPoller<E, B>,
-	join_handle: Option<BranchJoinHandle>,
+	join_handle: BranchJoinHandle,
 }
 
 /// Error types that can occur if polling is unsuccessful.
@@ -273,7 +273,7 @@ where
 	pub(crate) fn new(poller: EventPoller<E, B>, join_handle: BranchJoinHandle) -> Self {
 		Self {
 			poller,
-			join_handle: Some(join_handle),
+			join_handle,
 		}
 	}
 
@@ -281,23 +281,7 @@ where
 	///
 	/// The returned handle can be moved into `and_then_joining(...)` to join this branch into a
 	/// downstream dependency chain.
-	pub fn join_handle(&mut self) -> BranchJoinHandle {
-		self.join_handle.take().expect("Branch join handle already taken.")
-	}
-
-	/// Polls the ring buffer and returns an [`EventGuard`] if any events are available.
-	pub fn poll(&mut self) -> Result<EventGuard<'_, E, B>, Polling> {
-		self.poller.poll()
-	}
-
-	/// Polls for available events, yielding at most `limit` events.
-	pub fn poll_take(&mut self, limit: u64) -> Result<EventGuard<'_, E, B>, Polling> {
-		self.poller.poll_take(limit)
-	}
-
-	/// Returns `true` if there is at least one event available to poll.
-	#[inline]
-	pub fn has_available(&self) -> bool {
-		self.poller.has_available()
+	pub fn join_handle(self) -> (BranchJoinHandle, EventPoller<E, B>) {
+		(self.join_handle, self.poller)
 	}
 }

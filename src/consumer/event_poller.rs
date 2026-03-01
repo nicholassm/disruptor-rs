@@ -1,7 +1,7 @@
 use std::{sync::{atomic::{fence, AtomicI64, Ordering}, Arc}};
 use crossbeam_utils::CachePadded;
 use thiserror::Error;
-use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
+use crate::{cursor::{BranchJoinHandle, Cursor, CursorHandle}, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 
 /// Represents an EventPoller that can be used to poll events from the ring buffer.
 /// Use the EventPoller when you want to control your own thread
@@ -54,6 +54,17 @@ pub struct EventPoller<E, B> {
 	dependent_barrier:    Arc<B>,
 	shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
 	cursor:               Arc<Cursor>,
+}
+
+/// An [`EventPoller`] created via `branch_poller`, along with a non-cloneable join handle.
+///
+/// This wrapper exists so callers can wire DAG topologies without needing access to internal cursor
+/// types. Use [`join_handle`](Self::join_handle) to obtain a handle that can be joined into a
+/// downstream dependency chain.
+#[must_use = "A branch poller participates in producer back-pressure. Dropping it without polling can cause producers to stall."]
+pub struct BranchPoller<E, B> {
+	poller:      EventPoller<E, B>,
+	join_handle: BranchJoinHandle,
 }
 
 /// Error types that can occur if polling is unsuccessful.
@@ -132,6 +143,14 @@ where
 		}
 	}
 
+	/// Returns a clone of this poller's cursor handle.
+	///
+	/// Used to wire DAG topologies where downstream consumers or join barriers
+	/// (e.g. `and_then_joining`) need to track this consumer's progress.
+	pub fn cursor(&self) -> CursorHandle {
+		CursorHandle(Arc::clone(&self.cursor))
+	}
+
 	/// Polls the ring buffer and returns an [`EventGuard`] if any events are available.
 	/// The guard can be used like an iterator and yields all available events at the time of polling.
 	/// Dropping the guard will signal to the Disruptor that the events have been processed.
@@ -173,6 +192,20 @@ where
 	/// ```
 	pub fn poll(&mut self) -> Result<EventGuard<'_, E, B>, Polling> {
 		self.poll_take(u64::MAX)
+	}
+
+	/// Returns `true` if there is at least one event available to poll.
+	///
+	/// This is a cheap check (no fence, no mutation) intended for use as a
+	/// double-check before blocking on a condition variable. It does NOT
+	/// advance the cursor or consume any events.
+	///
+	/// Note: This does not check for shutdown. Callers should still call [`poll`](Self::poll) /
+	/// [`poll_take`](Self::poll_take) and handle [`Polling::Shutdown`].
+	#[inline]
+	pub fn has_available(&self) -> bool {
+		let sequence = self.cursor.relaxed_value() + 1;
+		self.dependent_barrier.get_after(sequence) >= sequence
 	}
 
 	/// Polls for available events, yielding at most `limit` events.
@@ -230,5 +263,25 @@ where
 			sequence,
 			available,
 		})
+	}
+}
+
+impl<E, B> BranchPoller<E, B>
+where
+	B: Barrier,
+{
+	pub(crate) fn new(poller: EventPoller<E, B>, join_handle: BranchJoinHandle) -> Self {
+		Self {
+			poller,
+			join_handle,
+		}
+	}
+
+	/// Takes the join handle for this branch.
+	///
+	/// The returned handle can be moved into `and_then_joining(...)` to join this branch into a
+	/// downstream dependency chain.
+	pub fn join_handle(self) -> (BranchJoinHandle, EventPoller<E, B>) {
+		(self.join_handle, self.poller)
 	}
 }

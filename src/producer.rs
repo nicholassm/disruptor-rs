@@ -4,7 +4,6 @@ use thiserror::Error;
 pub mod single;
 pub mod multi;
 
-use std::sync::{atomic::AtomicI64, Arc};
 use crate::{barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 
 /// Barrier for producers.

@@ -1,10 +1,10 @@
 //! Module for structs for building a Single Producer Disruptor in a type safe way.
 //!
-//! To get started building a Single Producer Disruptor, invoke [super::build_multi_producer].
+//! To get started building a Single Producer Disruptor, invoke [super::build_single_producer].
 
 use std::{marker::PhantomData, sync::Arc};
 
-use crate::{barrier::Barrier, builder::ProcessorSettings, consumer::{event_poller::EventPoller, MultiConsumerBarrier, SingleConsumerBarrier}, producer::single::{SingleProducer, SingleProducerBarrier}, wait_strategies::WaitStrategy, Sequence};
+use crate::{barrier::Barrier, builder::ProcessorSettings, consumer::{event_poller::{BranchPoller, EventPoller}, start_processor, start_processor_with_state, MultiConsumerBarrier, SingleConsumerBarrier}, cursor::{BranchJoinHandle, Cursor, CursorHandle}, producer::single::{SingleProducer, SingleProducerBarrier}, wait_strategies::WaitStrategy, Sequence};
 
 use super::{Builder, Shared, MC, NC, SC};
 
@@ -19,6 +19,69 @@ pub struct SPBuilder<State, E, W, B> {
 impl<E, W, B, S> ProcessorSettings<E, W> for SPBuilder<S, E, W, B> {
 	fn shared(&mut self) -> &mut Shared<E, W> {
 		&mut self.shared
+	}
+}
+
+impl<E, W, B, S> SPBuilder<S, E, W, B>
+where
+	E: 'static + Send + Sync,
+	B: 'static + Barrier,
+{
+	/// Create an out-of-band [`EventPoller`] that depends on the current barrier.
+	///
+	/// This is intended for building DAG topologies where a branch runs in parallel with multiple
+	/// stages, and is only joined back at a later point (use [`and_then_joining`](Self::and_then_joining)).
+	/// Use [`BranchPoller::join_handle`] to obtain a handle that can be joined downstream.
+	///
+	/// This poller participates in producer back-pressure, but does not affect the builder's
+	/// dependency chain unless it is explicitly joined.
+	///
+	/// Note: Dropping the returned poller without advancing it can cause producers to eventually
+	/// stall when the ring buffer wraps, since it participates in producer back-pressure.
+	pub fn branch_poller(&mut self) -> BranchPoller<E, B> {
+		let cursor = Arc::new(Cursor::new(-1));
+		self.shared.add_producer_gating_cursor(Arc::clone(&cursor));
+		let poller = EventPoller::new(
+			Arc::clone(&self.shared.ring_buffer),
+			Arc::clone(&self.dependent_barrier),
+			Arc::clone(&self.shared.shutdown_at_sequence),
+			Arc::clone(&cursor));
+		BranchPoller::new(poller, BranchJoinHandle(cursor))
+	}
+}
+
+impl<E, W, B, S> SPBuilder<S, E, W, B>
+where
+	E: 'static + Send + Sync,
+	W: 'static + WaitStrategy,
+	B: 'static + Barrier,
+{
+	/// Create an out-of-band processor that depends on the current barrier.
+	///
+	/// Like [`branch_poller`](Self::branch_poller), this is intended for wiring DAG topologies where
+	/// a branch runs in parallel with multiple stages and is only joined back later.
+	///
+	/// Returns a join handle that can be moved into [`and_then_joining`](Self::and_then_joining).
+	pub fn branch_handle_events_with<EH>(&mut self, event_handler: EH) -> BranchJoinHandle
+	where
+		EH: 'static + Send + FnMut(&E, Sequence, bool),
+	{
+		let barrier            = Arc::clone(&self.dependent_barrier);
+		let (cursor, consumer) = start_processor(event_handler, &mut self.shared, barrier);
+		self.shared.add_branch_consumer_and_cursor(consumer, Arc::clone(&cursor));
+		BranchJoinHandle(cursor)
+	}
+
+	/// Like [`branch_handle_events_with`](Self::branch_handle_events_with), but with state.
+	pub fn branch_handle_events_and_state_with<EH, S2, IS>(&mut self, event_handler: EH, initialize_state: IS) -> BranchJoinHandle
+	where
+		EH: 'static + Send + FnMut(&mut S2, &E, Sequence, bool),
+		IS: 'static + Send + FnOnce() -> S2,
+	{
+		let barrier            = Arc::clone(&self.dependent_barrier);
+		let (cursor, consumer) = start_processor_with_state(event_handler, &mut self.shared, barrier, initialize_state);
+		self.shared.add_branch_consumer_and_cursor(consumer, Arc::clone(&cursor));
+		BranchJoinHandle(cursor)
 	}
 }
 
@@ -104,6 +167,7 @@ where
 	/// Finish the build and get a [`SingleProducer`].
 	pub fn build(mut self) -> SingleProducer<E, SingleConsumerBarrier> {
 		let mut consumer_cursors = self.shared().current_consumer_cursors.take().unwrap();
+		let producer_gating_cursors = std::mem::take(&mut self.shared.producer_gating_cursors);
 		// Guaranteed to be present by construction.
 		let consumer_barrier     = SingleConsumerBarrier::new(consumer_cursors.remove(0));
 		SingleProducer::new(
@@ -111,7 +175,8 @@ where
 			self.shared.ring_buffer,
 			self.producer_barrier,
 			self.shared.consumers,
-		consumer_barrier)
+			consumer_barrier,
+			producer_gating_cursors)
 	}
 
 	/// Get an EventPoller.
@@ -139,6 +204,24 @@ where
 			shared:           self.shared,
 			producer_barrier: self.producer_barrier,
 			dependent_barrier,
+		}
+	}
+
+	/// Like [`and_then`](Self::and_then) but the resulting barrier also waits for extra cursors
+	/// from other branches (e.g. created via [`branch_poller`](Self::branch_poller)).
+	pub fn and_then_joining(mut self, extra_cursors: Vec<CursorHandle>) -> SPBuilder<NC, E, W, MultiConsumerBarrier> {
+		// Guaranteed to be present by construction.
+		let consumer_cursors  = self.shared().current_consumer_cursors.as_mut().unwrap();
+		let mut all_cursors   = Vec::with_capacity(1 + extra_cursors.len());
+		all_cursors.push(consumer_cursors.remove(0));
+		all_cursors.extend(extra_cursors.into_iter().map(|c| c.0));
+		let dependent_barrier = Arc::new(MultiConsumerBarrier::new(all_cursors));
+
+		SPBuilder {
+			dependent_barrier,
+			state:            PhantomData,
+			shared:           self.shared,
+			producer_barrier: self.producer_barrier,
 		}
 	}
 
@@ -224,15 +307,34 @@ where
 		}
 	}
 
+	/// Like [`and_then`](Self::and_then) but the resulting barrier also waits for extra cursors
+	/// from other branches (e.g. created via [`branch_poller`](Self::branch_poller)).
+	pub fn and_then_joining(mut self, extra_cursors: Vec<CursorHandle>) -> SPBuilder<NC, E, W, MultiConsumerBarrier> {
+		let consumer_cursors  = self.shared().current_consumer_cursors.replace(vec![]).unwrap();
+		let mut all_cursors   = Vec::with_capacity(consumer_cursors.len() + extra_cursors.len());
+		all_cursors.extend(consumer_cursors);
+		all_cursors.extend(extra_cursors.into_iter().map(|c| c.0));
+		let dependent_barrier = Arc::new(MultiConsumerBarrier::new(all_cursors));
+
+		SPBuilder {
+			dependent_barrier,
+			state:            PhantomData,
+			shared:           self.shared,
+			producer_barrier: self.producer_barrier,
+		}
+	}
+
 	/// Finish the build and get a [`SingleProducer`].
 	pub fn build(mut self) -> SingleProducer<E, MultiConsumerBarrier> {
-		let consumer_cursors = self.shared().current_consumer_cursors.take().unwrap();
+		let mut consumer_cursors = self.shared().current_consumer_cursors.take().unwrap();
+		consumer_cursors.extend(std::mem::take(&mut self.shared.producer_gating_cursors));
 		let consumer_barrier = MultiConsumerBarrier::new(consumer_cursors);
 		SingleProducer::new(
 			self.shared.shutdown_at_sequence,
 			self.shared.ring_buffer,
 			self.producer_barrier,
 			self.shared.consumers,
-			consumer_barrier)
+			consumer_barrier,
+			vec![])
 	}
 }

@@ -1065,6 +1065,7 @@ mod tests {
 		assert_eq!(ep_report.poll().err(), Some(Polling::Shutdown));
 	}
 
+	#[cfg_attr(miri, ignore)]// Miri disabled for now.
 	#[test]
 	fn spsc_branch_processor_joined_after_multiple_stages() {
 		let mut builder = build_single_producer(8, factory(), BusySpin);
@@ -1152,6 +1153,7 @@ mod tests {
 		assert_eq!(ep_report.poll().err(), Some(Polling::Shutdown));
 	}
 
+	#[cfg_attr(miri, ignore)]// Miri disabled for now.
 	#[test]
 	fn spsc_branch_processor_with_state_joined_after_multiple_stages() {
 		let mut builder = build_single_producer(8, factory(), BusySpin);

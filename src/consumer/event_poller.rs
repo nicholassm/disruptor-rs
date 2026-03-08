@@ -17,7 +17,7 @@ use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 ///# }
 ///# let factory = || Event { price: 0.0 };
 ///# let builder = build_single_producer(8, factory, BusySpin);
-///# let (mut event_poller, builder) = builder.event_poller();
+///# let (mut event_poller, builder) = builder.new_event_poller();
 ///# let mut producer = builder.build();
 ///# producer.publish(|e| { e.price = 42.0; });
 ///# drop(producer);
@@ -56,12 +56,13 @@ pub struct EventPoller<E, B> {
 	cursor:               Arc<Cursor>,
 }
 
-/// An (opaque) promise that a branch will be joined back into the main flow at a later point.
-pub struct JoinPromise<E, B> {
+/// An (opaque) branch that needs to be joined back into the main
+/// flow at a later point to get an EventPoller (for the branch).
+pub struct Branch<E, B> {
 	poller: EventPoller<E, B>,
 }
 
-impl<E, B> JoinPromise<E, B> {
+impl<E, B> Branch<E, B> {
 	pub(crate) fn new(poller: EventPoller<E, B>) -> Self {
 		Self { poller }
 	}
@@ -176,7 +177,7 @@ where
 	///# }
 	///# let factory = || Event { price: 0.0 };
 	///# let builder = build_single_producer(8, factory, BusySpin);
-	///# let (mut event_poller, builder) = builder.event_poller();
+	///# let (mut event_poller, builder) = builder.new_event_poller();
 	///# let mut producer = builder.build();
 	///# producer.publish(|e| { e.price = 42.0; });
 	///# drop(producer);
@@ -226,7 +227,7 @@ where
 	///# }
 	///# let factory = || Event { price: 0.0 };
 	///# let builder = build_single_producer(8, factory, BusySpin);
-	///# let (mut event_poller, builder) = builder.event_poller();
+	///# let (mut event_poller, builder) = builder.new_event_poller();
 	///# let mut producer = builder.build();
 	///# producer.publish(|e| { e.price = 42.0; });
 	///# drop(producer);

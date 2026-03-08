@@ -4,7 +4,7 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
-use crate::{Sequence, barrier::Barrier, builder::ProcessorSettings, consumer::{MultiConsumerBarrier, SingleConsumerBarrier, event_poller::{EventPoller, JoinPromise}}, producer::multi::{MultiProducer, MultiProducerBarrier}, wait_strategies::WaitStrategy};
+use crate::{Sequence, barrier::Barrier, builder::ProcessorSettings, consumer::{MultiConsumerBarrier, SingleConsumerBarrier, event_poller::{EventPoller, Branch}}, producer::multi::{MultiProducer, MultiProducerBarrier}, wait_strategies::WaitStrategy};
 
 use super::{Builder, Shared, MC, NC, SC};
 
@@ -35,8 +35,8 @@ where
 	/// This is intended for building DAG topologies where a branch runs in parallel with multiple
 	/// stages, and is only joined back at a later point.
 	#[must_use]
-	pub fn branch(&mut self) -> JoinPromise<E, B> {
-		self.new_branch()
+	pub fn new_branch(&mut self) -> Branch<E, B> {
+		self.build_branch()
 	}
 }
 
@@ -71,8 +71,8 @@ where
 	}
 
 	/// Get an EventPoller.
-	pub fn event_poller(mut self) -> (EventPoller<E, B>, MPBuilder<SC, E, W, B>) {
-		let event_poller = self.get_event_poller();
+	pub fn new_event_poller(mut self) -> (EventPoller<E, B>, MPBuilder<SC, E, W, B>) {
+		let event_poller = self.build_event_poller();
 
 		(event_poller,
 		MPBuilder {
@@ -84,11 +84,11 @@ where
 	}
 
 	/// Join a branched `EventPoller` back into the main flow.
-	pub fn join<B2>(mut self, join_promise: JoinPromise<E, B2>) -> (EventPoller<E, B2>, MPBuilder<SC, E, W, B>) {
-		self.add_cursor_from_branch(&join_promise);
+	pub fn join<B2>(mut self, branch: Branch<E, B2>) -> (EventPoller<E, B2>, MPBuilder<SC, E, W, B>) {
+		self.add_cursor_from_branch(&branch);
 
 		(
-			join_promise.into_poller(),
+			branch.into_poller(),
 			MPBuilder {
 				state:             PhantomData,
 				shared:            self.shared,
@@ -135,8 +135,8 @@ where
 	B: 'static + Barrier,
 {
 	/// Get an EventPoller.
-	pub fn event_poller(mut self) -> (EventPoller<E, B>, MPBuilder<MC, E, W, B>) {
-		let event_poller = self.get_event_poller();
+	pub fn new_event_poller(mut self) -> (EventPoller<E, B>, MPBuilder<MC, E, W, B>) {
+		let event_poller = self.build_event_poller();
 
 		(event_poller,
 		MPBuilder {
@@ -148,11 +148,11 @@ where
 	}
 
 	/// Join a branched `EventPoller` back into the main flow.
-	pub fn join<B2>(mut self, join_promise: JoinPromise<E, B2>) -> (EventPoller<E, B2>, MPBuilder<MC, E, W, B>) {
-		self.add_cursor_from_branch(&join_promise);
+	pub fn join<B2>(mut self, branch: Branch<E, B2>) -> (EventPoller<E, B2>, MPBuilder<MC, E, W, B>) {
+		self.add_cursor_from_branch(&branch);
 		
 		(
-			join_promise.into_poller(),
+			branch.into_poller(),
 			MPBuilder {
 				state:             PhantomData,
 				shared:            self.shared,
@@ -227,8 +227,8 @@ where
 	B: 'static + Barrier,
 {
 	/// Get an EventPoller.
-	pub fn event_poller(mut self) -> (EventPoller<E, B>, MPBuilder<MC, E, W, B>) {
-		let event_poller = self.get_event_poller();
+	pub fn new_event_poller(mut self) -> (EventPoller<E, B>, MPBuilder<MC, E, W, B>) {
+		let event_poller = self.build_event_poller();
 
 		(event_poller,
 		MPBuilder {
@@ -240,11 +240,11 @@ where
 	}
 
 	/// Join a branched `EventPoller` back into the main flow.
-	pub fn join<B2>(mut self, join_promise: JoinPromise<E, B2>) -> (EventPoller<E, B2>, MPBuilder<MC, E, W, B>) {
-		self.add_cursor_from_branch(&join_promise);
+	pub fn join<B2>(mut self, branch: Branch<E, B2>) -> (EventPoller<E, B2>, MPBuilder<MC, E, W, B>) {
+		self.add_cursor_from_branch(&branch);
 
 		(
-			join_promise.into_poller(),
+			branch.into_poller(),
 			MPBuilder {
 				state:             PhantomData,
 				shared:            self.shared,

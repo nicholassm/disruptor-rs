@@ -207,7 +207,7 @@ fn main() {
 
     let size = 64;
     let builder = disruptor::build_single_producer(size, factory, BusySpin);
-    let (mut poller, builder) = builder.event_poller();
+    let (mut poller, builder) = builder.new_event_poller();
     let mut producer = builder.build();
 
     // Publish single events into the Disruptor via the `Producer` handle.

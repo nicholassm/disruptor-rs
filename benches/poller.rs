@@ -61,7 +61,7 @@ fn polling(group: &mut BenchmarkGroup<WallTime>, inputs: (i64, u64), param: &str
 	let factory = || { Event { data: 0 } };
 
 	let builder = disruptor::build_single_producer(DATA_STRUCTURE_SIZE, factory, BusySpin);
-	let (mut poller, builder) = builder.event_poller();
+	let (mut poller, builder) = builder.new_event_poller();
 	let mut producer = builder.build();
 
 	// Use an AtomicI64 to "extract" the value from the processing thread with the Event Poller.

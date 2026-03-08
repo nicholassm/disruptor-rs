@@ -226,7 +226,7 @@
 //!
 //! let factory = || Event { price: 0.0 };
 //! let builder = build_single_producer(8, factory, BusySpin);
-//! let (mut event_poller, builder) = builder.event_poller();
+//! let (mut event_poller, builder) = builder.new_event_poller();
 //! let mut producer = builder.build();
 //!
 //! // Publish into the Disruptor.
@@ -281,9 +281,9 @@
 //! Producer -> ------- J --------> D
 //! ```
 //!
-//! Use [`SPBuilder::branch`](builder::single::SPBuilder::branch) /
-//! [`MPBuilder::branch`](builder::multi::MPBuilder::branch) to create a branch,
-//! take the returned [`JoinPromise`] and then use
+//! Use [`SPBuilder::new_branch`](builder::single::SPBuilder::new_branch) /
+//! [`MPBuilder::new_branch`](builder::multi::MPBuilder::new_branch) to create a branch,
+//! take the returned [`Branch`] and then use
 //! [`SPBuilder::join`](builder::single::SPBuilder::join) /
 //! [`MPBuilder::join`](builder::multi::MPBuilder::join) to join it into the
 //! downstream dependency chain. Joining returns an `EventPoller` for the branch
@@ -309,7 +309,7 @@ pub use crate::producer::{Producer, RingBufferFull, MissingFreeSlots};
 pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
 pub use crate::producer::{single::{SingleProducer, SingleProducerBarrier}, multi::{MultiProducer,  MultiProducerBarrier}};
 pub use crate::consumer::{SingleConsumerBarrier, MultiConsumerBarrier};
-pub use crate::consumer::event_poller::{EventPoller, Polling, EventGuard, JoinPromise};
+pub use crate::consumer::event_poller::{EventPoller, Polling, EventGuard, Branch};
 
 #[cfg(test)]
 mod tests {
@@ -877,9 +877,9 @@ mod tests {
 	#[test]
 	fn spmc_with_event_pollers() {
 		let builder       = build_single_producer(8, factory(), BusySpin);
-		let (mut ep1, b)  = builder.event_poller();
-		let (mut ep2, b)  = b.and_then().event_poller();
-		let (mut ep3, b)  = b.and_then().event_poller();
+		let (mut ep1, b)  = builder.new_event_poller();
+		let (mut ep2, b)  = b.and_then().new_event_poller();
+		let (mut ep3, b)  = b.and_then().new_event_poller();
 		let mut producer  = b.build();
 
 		// Polling before publication should yield no events.
@@ -928,9 +928,9 @@ mod tests {
 	#[test]
 	fn mpmc_with_event_pollers() {
 		let builder       = build_multi_producer(64, factory(), BusySpin);
-		let (mut ep1, b)  = builder.event_poller();
-		let (mut ep2, b)  = b.and_then().event_poller();
-		let (mut ep3, b)  = b.and_then().event_poller();
+		let (mut ep1, b)  = builder.new_event_poller();
+		let (mut ep2, b)  = b.and_then().new_event_poller();
+		let (mut ep3, b)  = b.and_then().new_event_poller();
 		let mut producer1 = b.build();
 		let mut producer2 = producer1.clone();
 
@@ -980,26 +980,26 @@ mod tests {
 		let mut builder = build_single_producer(8, factory(), BusySpin);
 
 		// Create out-of-band branch, depending on the producer.
-		let j = builder.branch();
+		let b = builder.new_branch();
 
-		let _unused = builder.branch(); // Unused branch should not cause any issues.
+		let _unused = builder.new_branch(); // Unused branch should not cause any issues.
 
 		// R1 depends on producer (main flow).
-		let (mut ep_r1, builder) = builder.event_poller();
+		let (mut ep_r1, builder) = builder.new_event_poller();
 
 		// ME depends on R1.
 		let builder = builder.and_then();
-		let (mut ep_me, builder) = builder.event_poller();
+		let (mut ep_me, builder) = builder.new_event_poller();
 
 		// R2 depends on ME.
 		let builder = builder.and_then();
-		let (mut ep_r2, builder) = builder.event_poller();
+		let (mut ep_r2, builder) = builder.new_event_poller();
 
 		// Join J back into the main flow (J depends on ME).
-		let (mut ep_j, builder) = builder.join(j);
+		let (mut ep_j, builder) = builder.join(b);
 
 		let builder = builder.and_then();
-		let (mut ep_report, builder) = builder.event_poller();
+		let (mut ep_report, builder) = builder.new_event_poller();
 
 		let mut producer = builder.build();
 
@@ -1056,24 +1056,24 @@ mod tests {
 		let mut builder = build_multi_producer(64, factory(), BusySpin);
 
 		// Create out-of-band branch, depending on the producer.
-		let j = builder.branch();
+		let b = builder.new_branch();
 
 		// R1 depends on producer.
-		let (mut ep_r1, builder) = builder.event_poller();
+		let (mut ep_r1, builder) = builder.new_event_poller();
 
 		// ME depends on R1.
 		let builder = builder.and_then();
-		let (mut ep_me, builder) = builder.event_poller();
+		let (mut ep_me, builder) = builder.new_event_poller();
 
 		// R2 depends on ME.
 		let builder = builder.and_then();
-		let (mut ep_r2, builder) = builder.event_poller();
+		let (mut ep_r2, builder) = builder.new_event_poller();
 
 		// Join J back into the main flow (J depends on ME).
-		let (mut ep_j, builder) = builder.join(j);
+		let (mut ep_j, builder) = builder.join(b);
 
 		let builder = builder.and_then();
-		let (mut ep_report, builder) = builder.event_poller();
+		let (mut ep_report, builder) = builder.new_event_poller();
 
 		let mut producer1 = builder.build();
 		let mut producer2 = producer1.clone();
@@ -1131,12 +1131,12 @@ mod tests {
 		let mut builder = build_single_producer(4, factory(), BusySpin);
 
 		// Create out-of-band branch, depending on the producer.
-		let j = builder.branch();
+		let b = builder.new_branch();
 
 		// Join J back into the main flow and get Event Poller.
-		let (mut ep_j, builder) = builder.join(j);
+		let (mut ep_j, builder) = builder.join(b);
 		// A depends on producer.
-		let (mut ep_a, builder) = builder.event_poller();
+		let (mut ep_a, builder) = builder.new_event_poller();
 
 		let mut producer = builder.build();
 
@@ -1187,20 +1187,20 @@ mod tests {
 		let mut builder = build_single_producer(8, factory(), BusySpin);
 
 		// Branch out from the producer.
-		let j1 = builder.branch();
-		let j2 = builder.branch();
-		let j3 = builder.branch();
+		let b1 = builder.new_branch();
+		let b2 = builder.new_branch();
+		let b3 = builder.new_branch();
 
 		// A depends on producer.
-		let (mut ep_a, builder) = builder.event_poller();
+		let (mut ep_a, builder) = builder.new_event_poller();
 
-		// Join branched J1/J2/J3 pollers into main flow.
-		let (mut ep_j1, builder) = builder.join(j1);
-		let (mut ep_j2, builder) = builder.join(j2);
-		let (mut ep_j3, builder) = builder.join(j3);
+		// Join branches b1/b2/b3 into main flow.
+		let (mut ep_j1, builder) = builder.join(b1);
+		let (mut ep_j2, builder) = builder.join(b2);
+		let (mut ep_j3, builder) = builder.join(b3);
 
 		let builder = builder.and_then();
-		let (mut ep_report, builder) = builder.event_poller();
+		let (mut ep_report, builder) = builder.new_event_poller();
 
 		let mut producer = builder.build();
 
@@ -1252,8 +1252,8 @@ mod tests {
 
 		let builder      = build_single_producer(8, factory(), BusySpin)
 			.handle_events_with(processor1);
-		let (mut ep1, b) = builder.event_poller();
-		let (mut ep2, b) = b.and_then().event_poller();
+		let (mut ep1, b) = builder.new_event_poller();
+		let (mut ep2, b) = b.and_then().new_event_poller();
 		let mut producer = b.build();
 
 		// Polling before publication should yield no events.
@@ -1292,8 +1292,8 @@ mod tests {
 
 		let builder       = build_multi_producer(64, factory(), BusySpin)
 			.handle_events_with(processor1);
-		let (mut ep1, b)  = builder.event_poller();
-		let (mut ep2, b)  = b.and_then().event_poller();
+		let (mut ep1, b)  = builder.new_event_poller();
+		let (mut ep2, b)  = b.and_then().new_event_poller();
 		let mut producer1 = b.build();
 		let mut producer2 = producer1.clone();
 

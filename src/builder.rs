@@ -5,7 +5,7 @@
 use std::sync::{atomic::AtomicI64, Arc};
 use core_affinity::CoreId;
 use crossbeam_utils::CachePadded;
-use crate::{Sequence, affinity::cpu_has_core_else_panic, barrier::{Barrier, NONE}, consumer::{event_poller::{EventPoller, JoinPromise}, start_processor, start_processor_with_state}};
+use crate::{Sequence, affinity::cpu_has_core_else_panic, barrier::{Barrier, NONE}, consumer::{event_poller::{EventPoller, Branch}, start_processor, start_processor_with_state}};
 use crate::consumer::Consumer;
 use crate::cursor::Cursor;
 use crate::producer::{single::SingleProducerBarrier, multi::MultiProducerBarrier};
@@ -165,7 +165,7 @@ where
 		self.shared().add_consumer_and_cursor(consumer, cursor);
 	}
 
-	fn get_event_poller(&mut self) -> EventPoller<E, B> {
+	fn build_event_poller(&mut self) -> EventPoller<E, B> {
 		let cursor = Arc::new(Cursor::new());
 		self.shared().add_cursor(Arc::clone(&cursor));
 
@@ -177,18 +177,17 @@ where
 		)
 	}
 
-	fn new_branch(&mut self) -> JoinPromise<E, B> {
-		let cursor = Arc::new(Cursor::new());
+	fn build_branch(&mut self) -> Branch<E, B> {
 		let poller = EventPoller::new(
 			Arc::clone(&self.shared().ring_buffer),
 			Arc::clone(&self.dependent_barrier()),
 			Arc::clone(&self.shared().shutdown_at_sequence),
-			cursor);
-		JoinPromise::new(poller)
+			Arc::new(Cursor::new()));
+		Branch::new(poller)
 	}
 
-	fn add_cursor_from_branch<B2>(&mut self, join_promise: &JoinPromise<E, B2>) {
-		self.shared().add_cursor(join_promise.cursor_for_poller());
+	fn add_cursor_from_branch<B2>(&mut self, branch: &Branch<E, B2>) {
+		self.shared().add_cursor(branch.cursor_for_poller());
 	}
 
 	fn add_event_handler_with_state<EH, S, IS>(&mut self, event_handler: EH, initialize_state: IS)

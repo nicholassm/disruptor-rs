@@ -1,39 +1,10 @@
 use crossbeam_utils::CachePadded;
-use std::sync::{
-	atomic::{AtomicI64, Ordering},
-	Arc,
-};
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::Sequence;
 
 pub(crate) struct Cursor {
 	counter: CachePadded<AtomicI64>
-}
-
-/// Opaque cursor handle used to coordinate dependencies between consumers.
-///
-/// This type is primarily intended to be passed between topology-building APIs such as
-/// [`SPBuilder::branch_poller`](crate::builder::single::SPBuilder::branch_poller),
-/// [`MPBuilder::branch_poller`](crate::builder::multi::MPBuilder::branch_poller), and
-/// [`SPBuilder::and_then_joining`](crate::builder::single::SPBuilder::and_then_joining) /
-/// [`MPBuilder::and_then_joining`](crate::builder::multi::MPBuilder::and_then_joining).
-///
-/// Obtain a cursor handle via [`EventPoller::cursor`](crate::EventPoller::cursor).
-#[derive(Clone)]
-pub struct CursorHandle(pub(crate) Arc<Cursor>);
-
-/// Non-cloneable cursor handle for branch consumers/pollers.
-///
-/// This is primarily intended to be moved into APIs like
-/// [`SPBuilder::and_then_joining`](crate::builder::single::SPBuilder::and_then_joining) /
-/// [`MPBuilder::and_then_joining`](crate::builder::multi::MPBuilder::and_then_joining).
-#[must_use = "Dropping a branch join handle means the branch will not be joined into any downstream barrier."]
-pub struct BranchJoinHandle(pub(crate) Arc<Cursor>);
-
-impl From<BranchJoinHandle> for CursorHandle {
-	fn from(value: BranchJoinHandle) -> Self {
-		CursorHandle(value.0)
-	}
 }
 
 impl Cursor {

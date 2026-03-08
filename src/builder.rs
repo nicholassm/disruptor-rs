@@ -5,7 +5,7 @@
 use std::sync::{atomic::AtomicI64, Arc};
 use core_affinity::CoreId;
 use crossbeam_utils::CachePadded;
-use crate::{affinity::cpu_has_core_else_panic, barrier::{Barrier, NONE}, consumer::{start_processor, start_processor_with_state, event_poller::EventPoller}, Sequence};
+use crate::{Sequence, affinity::cpu_has_core_else_panic, barrier::{Barrier, NONE}, consumer::{event_poller::{EventPoller, JoinPromise}, start_processor, start_processor_with_state}};
 use crate::consumer::Consumer;
 use crate::cursor::Cursor;
 use crate::producer::{single::SingleProducerBarrier, multi::MultiProducerBarrier};
@@ -177,6 +177,10 @@ where
 		)
 	}
 
+	fn add_cursor_from_branched_poller<B2>(&mut self, join_promise: &JoinPromise<E, B2>) {
+		self.shared().add_cursor(join_promise.cursor_for_poller());
+	}
+
 	fn add_event_handler_with_state<EH, S, IS>(&mut self, event_handler: EH, initialize_state: IS)
 	where
 		EH: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
@@ -195,7 +199,6 @@ pub struct Shared<E, W> {
 	pub(crate) shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
 	pub(crate) ring_buffer:          Arc<RingBuffer<E>>,
 	pub(crate) consumers:            Vec<Consumer>,
-	pub(crate) producer_gating_cursors: Vec<Arc<Cursor>>,
 	current_consumer_cursors:        Option<Vec<Arc<Cursor>>>,
 	pub(crate) wait_strategy:        W,
 	pub(crate) thread_context:       ThreadContext,
@@ -216,18 +219,8 @@ impl <E, W> Shared<E, W> {
 			shutdown_at_sequence,
 			current_consumer_cursors,
 			consumers: vec![],
-			producer_gating_cursors: vec![],
 			thread_context: ThreadContext::default(),
 		}
-	}
-
-	pub(crate) fn add_producer_gating_cursor(&mut self, cursor: Arc<Cursor>) {
-		self.producer_gating_cursors.push(cursor);
-	}
-
-	pub(crate) fn add_branch_consumer_and_cursor(&mut self, consumer: Consumer, cursor: Arc<Cursor>) {
-		self.consumers.push(consumer);
-		self.add_producer_gating_cursor(cursor);
 	}
 
 	fn add_consumer_and_cursor(&mut self, consumer: Consumer, cursor: Arc<Cursor>) {

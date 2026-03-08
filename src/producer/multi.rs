@@ -20,7 +20,6 @@ pub struct MultiProducer<E, C> {
 	shared_producer:             Arc<Mutex<SharedProducer>>,
 	producer_barrier:            Arc<MultiProducerBarrier>,
 	consumer_barrier:            Arc<C>,
-	extra_gating_cursors:        Vec<Arc<Cursor>>,
 	/// Next sequence number for this MultiProducer to publish.
 	claimed_sequence:            Sequence,
 	/// Highest sequence available for publication because the Consumers are "enough" behind
@@ -89,7 +88,6 @@ impl<E, C> Clone for MultiProducer<E, C> {
 		let producer_barrier     = Arc::clone(&self.producer_barrier);
 		let shared_producer      = Arc::clone(&self.shared_producer);
 		let consumer_barrier     = Arc::clone(&self.consumer_barrier);
-		let extra_gating_cursors = self.extra_gating_cursors.iter().map(Arc::clone).collect();
 		let ring_buffer          = Arc::clone(&self.ring_buffer);
 
 		MultiProducer {
@@ -98,7 +96,6 @@ impl<E, C> Clone for MultiProducer<E, C> {
 			shared_producer,
 			producer_barrier,
 			consumer_barrier,
-			extra_gating_cursors,
 			claimed_sequence: NONE,
 			sequence_clear_of_consumers: 0
 		}
@@ -127,8 +124,7 @@ where
 		ring_buffer:          Arc<RingBuffer<E>>,
 		producer_barrier:     Arc<MultiProducerBarrier>,
 		consumers:            Vec<Consumer>,
-		consumer_barrier:     C,
-		extra_gating_cursors: Vec<Arc<Cursor>>,
+		consumer_barrier:     C
 	) -> Self
 	{
 		let shared_producer = Arc::new(
@@ -148,7 +144,6 @@ where
 			shared_producer,
 			producer_barrier,
 			consumer_barrier,
-			extra_gating_cursors,
 			claimed_sequence: NONE,
 			sequence_clear_of_consumers
 		}
@@ -166,11 +161,7 @@ where
 				// We have to check where the rear consumer is in case we're about to
 				// publish into the slot currently being read by the slowest consumer.
 				// (Consumer is too far behind the producer to publish next n events).
-				let mut rear_sequence_read = self.consumer_barrier.get_after(current);
-				for cursor in &self.extra_gating_cursors {
-					let sequence = cursor.relaxed_value();
-					rear_sequence_read = std::cmp::min(rear_sequence_read, sequence);
-				}
+				let rear_sequence_read = self.consumer_barrier.get_after(current);
 				let free_slots         = self.ring_buffer.free_slots(current, rear_sequence_read);
 				if free_slots < n {
 					return Err(MissingFreeSlots((n - free_slots) as u64));

@@ -1,5 +1,5 @@
 use std::sync::atomic::{fence, Ordering};
-use crate::{barrier::{Barrier, NONE}, cursor::Cursor, producer::ProducerBarrier};
+use crate::{barrier::Barrier, cursor::Cursor, producer::ProducerBarrier};
 use crossbeam_utils::CachePadded;
 use crate::{consumer::Consumer, ringbuffer::RingBuffer, Sequence};
 use std::sync::{Arc, atomic::AtomicI64};
@@ -173,7 +173,7 @@ pub struct SingleProducerBarrier {
 impl SingleProducerBarrier {
 	pub(crate) fn new() -> Self {
 		Self {
-			cursor: Cursor::new(NONE)
+			cursor: Cursor::new()
 		}
 	}
 }

@@ -1,16 +1,16 @@
 use crossbeam_utils::CachePadded;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use crate::Sequence;
+use crate::{Sequence, barrier::NONE};
 
 pub(crate) struct Cursor {
 	counter: CachePadded<AtomicI64>
 }
 
 impl Cursor {
-	pub(crate) fn new(start_value: i64) -> Self {
+	pub(crate) fn new() -> Self {
 		Self {
-			counter: CachePadded::new(AtomicI64::new(start_value))
+			counter: CachePadded::new(AtomicI64::new(NONE))
 		}
 	}
 
@@ -38,7 +38,7 @@ mod tests {
 
 	#[test]
 	fn cursor_operations() {
-		let cursor = Cursor::new(-1);
+		let cursor = Cursor::new();
 
 		assert_eq!(cursor.compare_exchange(-1, 0).ok().unwrap(), -1);
 		assert_eq!(cursor.compare_exchange( 0, 1).ok().unwrap(),  0);

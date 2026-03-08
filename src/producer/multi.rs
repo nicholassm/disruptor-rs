@@ -246,7 +246,7 @@ impl MultiProducerBarrier {
 	pub(crate) fn new(size: usize) -> Self {
 		assert!(size >= 64, "Multi Producer Disruptor must have a size of minimum 64 slots.");
 
-		let cursor      = Cursor::new(NONE);
+		let cursor      = Cursor::new();
 		let i64_needed  = size/64;
 		// available encodes 1 bit for each slot.
 		// If the bit is 1 it means that the slot was published in the latest odd round

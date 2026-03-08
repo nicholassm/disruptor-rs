@@ -77,7 +77,7 @@ where
 	W:  'static + WaitStrategy,
 	B:  'static + Barrier + Send + Sync,
 {
-	let consumer_cursor      = Arc::new(Cursor::new(-1));// Initially, the consumer has not read slot 0 yet.
+	let consumer_cursor      = Arc::new(Cursor::new());
 	let wait_strategy        = builder.wait_strategy;
 	let ring_buffer          = Arc::clone(&builder.ring_buffer);
 	let shutdown_at_sequence = Arc::clone(&builder.shutdown_at_sequence);
@@ -122,7 +122,7 @@ where
 	W:  'static + WaitStrategy,
 	B:  'static + Barrier + Send + Sync,
 {
-	let consumer_cursor      = Arc::new(Cursor::new(-1));// Initially, the consumer has not read slot 0 yet.
+	let consumer_cursor      = Arc::new(Cursor::new());
 	let wait_strategy        = builder.wait_strategy;
 	let ring_buffer          = Arc::clone(&builder.ring_buffer);
 	let shutdown_at_sequence = Arc::clone(&builder.shutdown_at_sequence);

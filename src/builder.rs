@@ -166,7 +166,7 @@ where
 	}
 
 	fn get_event_poller(&mut self) -> EventPoller<E, B> {
-		let cursor = Arc::new(Cursor::new(-1)); // Initially, the consumer has not read slot 0 yet.
+		let cursor = Arc::new(Cursor::new());
 		self.shared().add_cursor(Arc::clone(&cursor));
 
 		EventPoller::new(
@@ -178,7 +178,7 @@ where
 	}
 
 	fn new_branch(&mut self) -> JoinPromise<E, B> {
-		let cursor = Arc::new(Cursor::new(-1));
+		let cursor = Arc::new(Cursor::new());
 		let poller = EventPoller::new(
 			Arc::clone(&self.shared().ring_buffer),
 			Arc::clone(&self.dependent_barrier()),

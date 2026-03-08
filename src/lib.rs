@@ -982,6 +982,8 @@ mod tests {
 		// Create out-of-band branch, depending on the producer.
 		let j = builder.branch();
 
+		let _unused = builder.branch(); // Unused branch should not cause any issues.
+
 		// R1 depends on producer (main flow).
 		let (mut ep_r1, builder) = builder.event_poller();
 

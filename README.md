@@ -285,7 +285,7 @@ fn main() {
 
     let mut builder = disruptor::build_single_producer(64, factory, BusySpin);
 
-    let branch = builder.branch();
+    let branch = builder.new_branch();
 
     let builder = builder
         .handle_events_with(a).and_then()

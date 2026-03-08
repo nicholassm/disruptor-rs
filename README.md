@@ -242,12 +242,12 @@ fn main() {
 Note, the Event Poller API can be interleaved with all the other builder functionality so you can mix and match
 closures submitted to managed threads, interdependencies, etc.
 
-## Out-of-band Branches
+## Out-of-Band Branches
 
 It's possible to create an out-of-band branch with an Event Poller.
-This can be used process events in parallel with the main stages.
+This can be used to process events in parallel with the main stages.
 
-As an example, a journaler could persist events while the other stages process events:
+As an example, a journaler could persist events while multiple other stages are processing in parallel:
 
 ```text
            /-- A -> B -> C --\

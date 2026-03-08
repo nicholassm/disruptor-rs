@@ -239,6 +239,69 @@ fn main() {
 }
 ```
 
+Note, the Event Poller API can be interleaved with all the other builder functionality so you can mix and match
+closures submitted to managed threads, interdependencies, etc.
+
+## Out-of-band Branches
+
+It's possible to create an out-of-band branch with an Event Poller.
+This can be used process events in parallel with the main stages.
+
+As an example, a journaler could persist events while the other stages process events:
+
+```text
+           /-- A -> B -> C --\
+Producer -> ------- J --------> D
+```
+
+Here, `A`, `B` and `C` process events in parallel with `J`.
+`D` only processes events after both `J` and `C` are done.
+
+In code it looks like this:
+
+```rust
+use disruptor::*;
+use std::thread;
+
+struct Event {
+    price: f64
+}
+
+fn main() {
+    let factory = || { Event { price: 0.0 }};
+
+    let a = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+        // Processing logic here.
+    };
+    let b = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+        // Some processing logic here.
+    };
+    let c = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+        // More processing logic here.
+    };
+    let d = |e: &Event, sequence: Sequence, end_of_batch: bool| {
+        // Final processing logic here.
+    };
+
+    let mut builder = disruptor::build_single_producer(64, factory, BusySpin);
+
+    let branch = builder.branch();
+
+    let builder = builder
+        .handle_events_with(a)
+        .handle_events_with(b)
+        .handle_events_with(c);
+
+    // Join branch back into main flow and get Event Poller for branch.
+    let (mut event_poller_j, builder) = builder.join(branch);
+
+    let mut producer = builder
+        .and_then()
+        .handle_events_with(d)
+        .build();
+}
+```
+
 # Features
 
 - [x] Single Producer Single Consumer (SPSC).
@@ -249,6 +312,7 @@ fn main() {
 - [x] Batch publication of events.
 - [x] Batch consumption of events.
 - [x] Event Poller API.
+- [x] Out-of-band branches with Event Pollers.
 - [x] Thread affinity can be set for the event processor thread(s).
 - [x] Set thread name of each event processor thread.
 

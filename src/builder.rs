@@ -177,7 +177,17 @@ where
 		)
 	}
 
-	fn add_cursor_from_branched_poller<B2>(&mut self, join_promise: &JoinPromise<E, B2>) {
+	fn new_branch(&mut self) -> JoinPromise<E, B> {
+		let cursor = Arc::new(Cursor::new(-1));
+		let poller = EventPoller::new(
+			Arc::clone(&self.shared().ring_buffer),
+			Arc::clone(&self.dependent_barrier()),
+			Arc::clone(&self.shared().shutdown_at_sequence),
+			cursor);
+		JoinPromise::new(poller)
+	}
+
+	fn add_cursor_from_branch<B2>(&mut self, join_promise: &JoinPromise<E, B2>) {
 		self.shared().add_cursor(join_promise.cursor_for_poller());
 	}
 

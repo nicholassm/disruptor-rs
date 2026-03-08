@@ -277,25 +277,17 @@
 //! final stage can wait for both the pipeline and `J`:
 //!
 //! ```text
-//! Producer -> R1 -> ME -> R2 ----\
-//! Producer -> J ---------------> Report (joins R2 + J)
+//!            /-- A -> B -> C --\
+//! Producer -> ------- J --------> D
 //! ```
 //!
-//! Use [`SPBuilder::branch_poller`](builder::single::SPBuilder::branch_poller) /
-//! [`MPBuilder::branch_poller`](builder::multi::MPBuilder::branch_poller) to create a branch poller,
-//! take its join handle via [`BranchPoller::join_handle`], and then use
-//! [`SPBuilder::and_then_joining`](builder::single::SPBuilder::and_then_joining) /
-//! [`MPBuilder::and_then_joining`](builder::multi::MPBuilder::and_then_joining) to join it into the
-//! downstream dependency chain.
-//!
-//! You can also create a "managed" branch consumer (event handler) using
-//! [`SPBuilder::branch_handle_events_with`](builder::single::SPBuilder::branch_handle_events_with) /
-//! [`MPBuilder::branch_handle_events_with`](builder::multi::MPBuilder::branch_handle_events_with).
-//! These methods return a [`BranchJoinHandle`] that can be joined later via
-//! `and_then_joining(vec![join_handle.into()])`.
-//!
-//! Note: A branch poller participates in producer back-pressure. If you create one and never poll it,
-//! producers can eventually stall when the ring buffer wraps.
+//! Use [`SPBuilder::branch`](builder::single::SPBuilder::branch) /
+//! [`MPBuilder::branch`](builder::multi::MPBuilder::branch) to create a branch,
+//! take the returned [`JoinPromise`] and then use
+//! [`SPBuilder::join`](builder::single::SPBuilder::join) /
+//! [`MPBuilder::join`](builder::multi::MPBuilder::join) to join it into the
+//! downstream dependency chain. Joining returns an `EventPoller` for the branch
+//! which can be used to poll events in the branch. (This ensures UB cannot happen.)
 
 #![deny(rustdoc::broken_intra_doc_links)]
 #![warn(missing_docs)]
@@ -317,7 +309,7 @@ pub use crate::producer::{Producer, RingBufferFull, MissingFreeSlots};
 pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
 pub use crate::producer::{single::{SingleProducer, SingleProducerBarrier}, multi::{MultiProducer,  MultiProducerBarrier}};
 pub use crate::consumer::{SingleConsumerBarrier, MultiConsumerBarrier};
-pub use crate::consumer::event_poller::{EventPoller, Polling, EventGuard};
+pub use crate::consumer::event_poller::{EventPoller, Polling, EventGuard, JoinPromise};
 
 #[cfg(test)]
 mod tests {
@@ -987,8 +979,8 @@ mod tests {
 	fn spsc_branch_from_producer_joined_after_multiple_stages() {
 		let mut builder = build_single_producer(8, factory(), BusySpin);
 
-		// J depends on producer (out-of-band).
-		let j = builder.branch_poller();
+		// Create out-of-band branch, depending on the producer.
+		let j = builder.branch();
 
 		// R1 depends on producer (main flow).
 		let (mut ep_r1, builder) = builder.event_poller();
@@ -1061,8 +1053,8 @@ mod tests {
 	fn mpmc_branch_from_producer_joined_after_multiple_stages() {
 		let mut builder = build_multi_producer(64, factory(), BusySpin);
 
-		// J depends on producer (out-of-band).
-		let j = builder.branch_poller();
+		// Create out-of-band branch, depending on the producer.
+		let j = builder.branch();
 
 		// R1 depends on producer.
 		let (mut ep_r1, builder) = builder.event_poller();
@@ -1136,11 +1128,12 @@ mod tests {
 	fn spsc_back_pressure_through_out_of_band_branch_poller() {
 		let mut builder = build_single_producer(4, factory(), BusySpin);
 
-		// J depends on producer (out-of-band).
-		let j = builder.branch_poller();
+		// Create out-of-band branch, depending on the producer.
+		let j = builder.branch();
 
-		// A depends on producer.
+		// Join J back into the main flow and get Event Poller.
 		let (mut ep_j, builder) = builder.join(j);
+		// A depends on producer.
 		let (mut ep_a, builder) = builder.event_poller();
 
 		let mut producer = builder.build();
@@ -1192,9 +1185,9 @@ mod tests {
 		let mut builder = build_single_producer(8, factory(), BusySpin);
 
 		// Branch out from the producer.
-		let j1 = builder.branch_poller();
-		let j2 = builder.branch_poller();
-		let j3 = builder.branch_poller();
+		let j1 = builder.branch();
+		let j2 = builder.branch();
+		let j3 = builder.branch();
 
 		// A depends on producer.
 		let (mut ep_a, builder) = builder.event_poller();

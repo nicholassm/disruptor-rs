@@ -4,7 +4,7 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
-use crate::{Sequence, barrier::Barrier, builder::ProcessorSettings, consumer::{MultiConsumerBarrier, SingleConsumerBarrier, event_poller::{EventPoller, JoinPromise}}, cursor::Cursor, producer::single::{SingleProducer, SingleProducerBarrier}, wait_strategies::WaitStrategy};
+use crate::{Sequence, barrier::Barrier, builder::ProcessorSettings, consumer::{MultiConsumerBarrier, SingleConsumerBarrier, event_poller::{EventPoller, JoinPromise}}, producer::single::{SingleProducer, SingleProducerBarrier}, wait_strategies::WaitStrategy};
 
 use super::{Builder, Shared, MC, NC, SC};
 
@@ -26,26 +26,17 @@ impl<E, W, B, S> SPBuilder<S, E, W, B>
 where
 	E: 'static + Send + Sync,
 	B: 'static + Barrier,
+	W: 'static + WaitStrategy,
 {
-	/// Create an out-of-band [`EventPoller`] that depends on the current barrier.
+	/// Branch from the current flow. The [`EventPoller`] for the branch can only be optained when
+	/// joining this branch back into the main flow by calling [`join`](Self::join) and passing
+	/// the `JoinPromise` returned by this method.
 	///
 	/// This is intended for building DAG topologies where a branch runs in parallel with multiple
-	/// stages, and is only joined back at a later point (use [`and_then_joining`](Self::and_then_joining)).
-	/// Use [`BranchPoller::join_handle`] to obtain a handle that can be joined downstream.
-	///
-	/// This poller participates in producer back-pressure, but does not affect the builder's
-	/// dependency chain unless it is explicitly joined.
-	///
-	/// Note: Dropping the returned poller without advancing it can cause producers to eventually
-	/// stall when the ring buffer wraps, since it participates in producer back-pressure.
-	pub fn branch_poller(&mut self) -> JoinPromise<E, B> {
-		let cursor = Arc::new(Cursor::new(-1));
-		let poller = EventPoller::new(
-			Arc::clone(&self.shared.ring_buffer),
-			Arc::clone(&self.dependent_barrier),
-			Arc::clone(&self.shared.shutdown_at_sequence),
-			Arc::clone(&cursor));
-		JoinPromise::new(poller)
+	/// stages, and is only joined back at a later point.
+	#[must_use]
+	pub fn branch(&mut self) -> JoinPromise<E, B> {
+		self.new_branch()
 	}
 }
 
@@ -60,7 +51,7 @@ where
 	}
 }
 
-impl <E, W, B> SPBuilder<NC, E, W, B>
+impl<E, W, B> SPBuilder<NC, E, W, B>
 where
 	E: 'static + Send + Sync,
 	W: 'static + WaitStrategy,
@@ -94,7 +85,7 @@ where
 
 	/// Join a branched `EventPoller` back into the main flow.
 	pub fn join<B2>(mut self, join_promise: JoinPromise<E, B2>) -> (EventPoller<E, B2>, SPBuilder<SC, E, W, B>) {
-		self.add_cursor_from_branched_poller(&join_promise);
+		self.add_cursor_from_branch(&join_promise);
 
 		(
 			join_promise.into_poller(),
@@ -171,7 +162,7 @@ where
 
 	/// Join a branched `EventPoller` back into the main flow.
 	pub fn join<B2>(mut self, join_promise: JoinPromise<E, B2>) -> (EventPoller<E, B2>, SPBuilder<MC, E, W, B>) {
-		self.add_cursor_from_branched_poller(&join_promise);
+		self.add_cursor_from_branch(&join_promise);
 		
 		(
 			join_promise.into_poller(),
@@ -250,7 +241,7 @@ where
 
 	/// Join a branched `EventPoller` back into the main flow.
 	pub fn join<B2>(mut self, join_promise: JoinPromise<E, B2>) -> (EventPoller<E, B2>, SPBuilder<MC, E, W, B>) {
-		self.add_cursor_from_branched_poller(&join_promise);
+		self.add_cursor_from_branch(&join_promise);
 
 		(
 			join_promise.into_poller(),

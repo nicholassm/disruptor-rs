@@ -56,6 +56,7 @@ pub struct EventPoller<E, B> {
 	cursor:               Arc<Cursor>,
 }
 
+/// An (opaque) promise that a branch will be joined back into the main flow at a later point.
 pub struct JoinPromise<E, B> {
 	poller: EventPoller<E, B>,
 }

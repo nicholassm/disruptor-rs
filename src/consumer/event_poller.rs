@@ -37,7 +37,7 @@ use crate::{cursor::Cursor, barrier::Barrier, ringbuffer::RingBuffer, Sequence};
 ///         Err(Polling::Shutdown) => { break; }, // Exit the loop if the Disruptor is shut down.
 ///     }
 ///     // 2. Or limit the number of events per poll:
-///     match event_poller.poll_take(64) {
+///     match event_poller.take(64) {
 ///         Ok(mut events) => {
 ///             // Process events same as above but yielding at most 64 events.
 ///             for event in &mut events {
@@ -157,7 +157,7 @@ where
 	///
 	/// This method does not block; it will return immediately.
 	///
-	/// This method is equivalent to calling [`EventPoller::poll_take`] with `u64::MAX` as the limit.
+	/// This method is equivalent to calling [`EventPoller::take`] with `u64::MAX` as the limit.
 	///
 	/// # Errors
 	///
@@ -191,7 +191,7 @@ where
 	/// };
 	/// ```
 	pub fn poll(&mut self) -> Result<EventGuard<'_, E, B>, Polling> {
-		self.poll_take(u64::MAX)
+		self.take(u64::MAX)
 	}
 
 	/// Returns `true` if there is at least one event available to poll.
@@ -201,7 +201,7 @@ where
 	/// advance the cursor or consume any events.
 	///
 	/// Note: This does not check for shutdown. Callers should still call [`poll`](Self::poll) /
-	/// [`poll_take`](Self::poll_take) and handle [`Polling::Shutdown`].
+	/// [`take`](Self::take) and handle [`Polling::Shutdown`].
 	#[inline]
 	pub fn has_available(&self) -> bool {
 		let sequence = self.cursor.relaxed_value() + 1;
@@ -230,7 +230,7 @@ where
 	///# let mut producer = builder.build();
 	///# producer.publish(|e| { e.price = 42.0; });
 	///# drop(producer);
-	/// match event_poller.poll_take(64) {
+	/// match event_poller.take(64) {
 	///     Ok(mut events) => {
 	///         // Process events same as above but yielding at most 64 events.
 	///         for event in &mut events {
@@ -241,7 +241,7 @@ where
 	///     Err(Polling::Shutdown) => { /* ... */ },
 	/// };
 	/// ```
-	pub fn poll_take(&mut self, limit: u64) -> Result<EventGuard<'_, E, B>, Polling> {
+	pub fn take(&mut self, limit: u64) -> Result<EventGuard<'_, E, B>, Polling> {
 		let cursor_at = self.cursor.relaxed_value();
 		let sequence  = cursor_at + 1;
 

@@ -255,7 +255,7 @@
 //!         Err(Polling::Shutdown) => { break; }, // Exit the loop if the Disruptor is shut down.
 //!     }
 //!     // 2. Or limit the maximum number of events yielded per poll.
-//!     match event_poller.poll_take(64) {
+//!     match event_poller.take(64) {
 //!         Ok(mut guard) => {
 //!             // Max 64 events (or fewer if less available) are yielded.
 //!             for event in &mut guard {
@@ -897,19 +897,19 @@ mod tests {
 			let mut guard_1 = ep1.poll().unwrap();
 			assert_eq!(2, (&mut guard_1).len());
 			assert_eq!(ep2.poll().err(),       Some(Polling::NoEvents));
-			assert_eq!(ep2.poll_take(2).err(), Some(Polling::NoEvents));
+			assert_eq!(ep2.take(2).err(), Some(Polling::NoEvents));
 			assert_eq!(ep3.poll().err(),       Some(Polling::NoEvents));
-			assert_eq!(ep3.poll_take(2).err(), Some(Polling::NoEvents));
+			assert_eq!(ep3.take(2).err(), Some(Polling::NoEvents));
 			assert_eq!(expected, guard_1.map(|e| e.num).collect::<Vec<_>>());
 		}
 
 		{// Now second poller sees events - here one at a time.
-			let mut guard_2 = ep2.poll_take(1).unwrap();
+			let mut guard_2 = ep2.take(1).unwrap();
 			assert_eq!(ep3.poll().err(), Some(Polling::NoEvents));
 			assert_eq!(vec![1], guard_2.map(|e| e.num).collect::<Vec<_>>());
 			drop(guard_2);
 			// Read next event.
-			let mut guard_2 = ep2.poll_take(1).unwrap();
+			let mut guard_2 = ep2.take(1).unwrap();
 			assert_eq!(vec![2], guard_2.map(|e| e.num).collect::<Vec<_>>());
 		}
 
@@ -953,12 +953,12 @@ mod tests {
 		}
 
 		{// Now second poller sees events - here one at a time.
-			let mut guard_2 = ep2.poll_take(1).unwrap();
+			let mut guard_2 = ep2.take(1).unwrap();
 			assert_eq!(ep3.poll().err(), Some(Polling::NoEvents));
 			assert_eq!(vec![1], guard_2.map(|e| e.num).collect::<Vec<_>>());
 			drop(guard_2);
 			// Read next event.
-			let mut guard_2 = ep2.poll_take(1).unwrap();
+			let mut guard_2 = ep2.take(1).unwrap();
 			assert_eq!(vec![2], guard_2.map(|e| e.num).collect::<Vec<_>>());
 		}
 

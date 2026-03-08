@@ -288,17 +288,17 @@ fn main() {
     let branch = builder.branch();
 
     let builder = builder
-        .handle_events_with(a)
-        .handle_events_with(b)
+        .handle_events_with(a).and_then()
+        .handle_events_with(b).and_then()
         .handle_events_with(c);
 
-    // Join branch back into main flow and get Event Poller for branch.
+    // Join branch back into main flow (currently, the `builder` is at `c`)
+	// and get Event Poller for branch.
     let (mut event_poller_j, builder) = builder.join(branch);
 
-    let mut producer = builder
-        .and_then()
-        .handle_events_with(d)
-        .build();
+    let builder = builder
+        .and_then() // Ensures `d` only processes after `c` and `j`
+        .handle_events_with(d);
 }
 ```
 

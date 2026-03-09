@@ -83,7 +83,7 @@ where
 		})
 	}
 
-	/// Join a branched `EventPoller` back into the main flow.
+	/// Join a branch back into the main flow and get the `EventPoller` for the branch.
 	pub fn join<B2>(mut self, branch: Branch<E, B2>) -> (EventPoller<E, B2>, SPBuilder<SC, E, W, B>) {
 		self.add_cursor_from_branch(&branch);
 
@@ -160,7 +160,7 @@ where
 		})
 	}
 
-	/// Join a branched `EventPoller` back into the main flow.
+	/// Join a branch back into the main flow and get the `EventPoller` for the branch.
 	pub fn join<B2>(mut self, branch: Branch<E, B2>) -> (EventPoller<E, B2>, SPBuilder<MC, E, W, B>) {
 		self.add_cursor_from_branch(&branch);
 		
@@ -239,7 +239,7 @@ where
 		})
 	}
 
-	/// Join a branched `EventPoller` back into the main flow.
+	/// Join a branch back into the main flow and get the `EventPoller` for the branch.
 	pub fn join<B2>(mut self, branch: Branch<E, B2>) -> (EventPoller<E, B2>, SPBuilder<MC, E, W, B>) {
 		self.add_cursor_from_branch(&branch);
 

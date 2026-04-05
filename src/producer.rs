@@ -95,7 +95,25 @@ impl<'a, E> Iterator for MutBatchIter<'a, E> {
 /// behaviour. (There is no guard in the library against breaching the limit due to performance considerations.)
 /// The limit can be avoided by e.g. dropping the Disruptor and creating a new if you have a use case where you can
 /// actually reach the limit in practice.
-pub trait Producer<E> {
+/// Provides methods for querying the ring buffer utilization.
+///
+/// Useful for monitoring and diagnostics -- for example, warning when the buffer
+/// is >90% full, indicating that the consumer cannot keep up with the producer.
+///
+/// All methods return snapshots that may be stale by the time they are used.
+/// They add no synchronization overhead (single relaxed atomic load).
+pub trait ProducerInfo {
+	/// Returns the total capacity (number of slots) of the ring buffer.
+	fn capacity(&self) -> usize;
+
+	/// Returns the number of events published but not yet consumed.
+	///
+	/// A fill level approaching [`capacity`](Self::capacity) indicates the consumer
+	/// is falling behind and the producer may soon block or return [`RingBufferFull`].
+	fn fill_level(&self) -> usize;
+}
+
+pub trait Producer<E>: ProducerInfo {
 	/// Publish an Event into the Disruptor.
 	/// Returns a `Result` with the published sequence number or a [RingBufferFull] in case the
 	/// ring buffer is full.

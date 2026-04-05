@@ -1,6 +1,6 @@
 use std::{process, sync::{atomic::{fence, AtomicI64, AtomicU64, Ordering}, Arc, Mutex}};
 use crossbeam_utils::CachePadded;
-use crate::{barrier::{Barrier, NONE}, consumer::Consumer, producer::ProducerBarrier, ringbuffer::RingBuffer, producer::{Producer, RingBufferFull}, Sequence};
+use crate::{barrier::{Barrier, NONE}, consumer::Consumer, producer::ProducerBarrier, ringbuffer::RingBuffer, producer::{Producer, ProducerInfo, RingBufferFull}, Sequence};
 use crate::cursor::Cursor;
 
 use super::{MissingFreeSlots, MutBatchIter};
@@ -112,6 +112,25 @@ impl<E, C> Drop for MultiProducer<E, C> {
 			self.shutdown_at_sequence.store(sequence, Ordering::Relaxed);
 			shared.consumers.iter_mut().for_each(|c| c.join());
 		}
+	}
+}
+
+impl<E, C> ProducerInfo for MultiProducer<E, C>
+where
+	C: Barrier
+{
+	#[inline]
+	fn capacity(&self) -> usize {
+		self.ring_buffer.size() as usize
+	}
+
+	#[inline]
+	fn fill_level(&self) -> usize {
+		let last_published = self.claimed_sequence - 1;
+		let last_consumed  = self.consumer_barrier.get_after(last_published);
+		let size           = self.ring_buffer.size();
+		let free           = self.ring_buffer.free_slots(last_published, last_consumed);
+		(size - free).max(0) as usize
 	}
 }
 

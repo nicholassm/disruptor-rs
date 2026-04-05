@@ -1,5 +1,5 @@
 use std::sync::atomic::{fence, Ordering};
-use crate::{barrier::Barrier, cursor::Cursor, producer::ProducerBarrier};
+use crate::{barrier::Barrier, cursor::Cursor, producer::{ProducerBarrier, ProducerInfo}};
 use crossbeam_utils::CachePadded;
 use crate::{consumer::Consumer, ringbuffer::RingBuffer, Sequence};
 use std::sync::{Arc, atomic::AtomicI64};
@@ -64,6 +64,25 @@ where
 	{
 		while self.next_sequences(n).is_err() { /* Empty. */ }
 		self.apply_updates(n, update);
+	}
+}
+
+impl<E, C> ProducerInfo for SingleProducer<E, C>
+where
+	C: Barrier
+{
+	#[inline]
+	fn capacity(&self) -> usize {
+		self.ring_buffer.size() as usize
+	}
+
+	#[inline]
+	fn fill_level(&self) -> usize {
+		let last_published = self.sequence - 1;
+		let last_consumed  = self.consumer_barrier.get_after(last_published);
+		let size           = self.ring_buffer.size();
+		let free           = self.ring_buffer.free_slots(last_published, last_consumed);
+		(size - free).max(0) as usize
 	}
 }
 

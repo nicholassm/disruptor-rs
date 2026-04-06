@@ -95,22 +95,25 @@ impl<'a, E> Iterator for MutBatchIter<'a, E> {
 /// behaviour. (There is no guard in the library against breaching the limit due to performance considerations.)
 /// The limit can be avoided by e.g. dropping the Disruptor and creating a new if you have a use case where you can
 /// actually reach the limit in practice.
-/// Provides methods for querying the ring buffer utilization.
+/// Provides a method for querying ring buffer utilization.
 ///
-/// Useful for monitoring and diagnostics -- for example, warning when the buffer
-/// is >90% full, indicating that the consumer cannot keep up with the producer.
-///
-/// All methods return snapshots that may be stale by the time they are used.
-/// They add no synchronization overhead (single relaxed atomic load).
+/// Useful for monitoring and for pre-checking available space before batch
+/// publishing. The returned value is a snapshot that may be stale by the
+/// time it is used. In the multi-producer case, this provides a best-effort
+/// estimate with high probability of being accurate.
 pub trait ProducerInfo {
-	/// Returns the total capacity (number of slots) of the ring buffer.
-	fn capacity(&self) -> usize;
-
-	/// Returns the number of events published but not yet consumed.
+	/// Returns the number of free slots in the ring buffer.
 	///
-	/// A fill level approaching [`capacity`](Self::capacity) indicates the consumer
-	/// is falling behind and the producer may soon block or return [`RingBufferFull`].
-	fn fill_level(&self) -> usize;
+	/// For a single producer, this is exact. For a multi-producer, this is
+	/// a best-effort estimate (another producer may claim slots concurrently).
+	///
+	/// Useful for checking whether a batch of size `n` will likely fit:
+	/// ```ignore
+	/// if producer.free_slots() >= batch.len() {
+	///     // High probability of success
+	/// }
+	/// ```
+	fn free_slots(&self) -> usize;
 }
 
 pub trait Producer<E>: ProducerInfo {

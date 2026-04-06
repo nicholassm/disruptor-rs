@@ -1408,4 +1408,74 @@ mod tests {
 			assert_eq!(seq_seen_by_pid, seen_sequences[seq_seen_by_pid as usize]);
 		}
 	}
+
+	#[test]
+	fn spsc_free_slots_initially_full() {
+		let barrier   = Arc::new(AtomicBool::new(true));
+		let processor = {
+			let barrier = Arc::clone(&barrier);
+			move |_: &Event, _, _| {
+				while barrier.load(Relaxed) { /* Block consumer. */ }
+			}
+		};
+		let producer = build_single_producer(8, factory(), BusySpinWithSpinLoopHint)
+			.handle_events_with(processor)
+			.build();
+
+		// Before any publishes, all slots should be free.
+		assert_eq!(producer.free_slots(), 8);
+
+		barrier.store(false, Relaxed);
+		drop(producer);
+	}
+
+	#[test]
+	fn spsc_free_slots_decreases_after_publish() {
+		let barrier   = Arc::new(AtomicBool::new(true));
+		let processor = {
+			let barrier = Arc::clone(&barrier);
+			move |_: &Event, _, _| {
+				while barrier.load(Relaxed) { /* Block consumer. */ }
+			}
+		};
+		let mut producer = build_single_producer(8, factory(), BusySpinWithSpinLoopHint)
+			.handle_events_with(processor)
+			.build();
+
+		producer.try_publish(|e| e.num = 1).unwrap();
+		producer.try_publish(|e| e.num = 2).unwrap();
+		producer.try_publish(|e| e.num = 3).unwrap();
+
+		// 3 published, consumer blocked => 5 free.
+		assert_eq!(producer.free_slots(), 5);
+
+		barrier.store(false, Relaxed);
+		drop(producer);
+	}
+
+	#[test]
+	fn mpsc_free_slots() {
+		let barrier   = Arc::new(AtomicBool::new(true));
+		let processor = {
+			let barrier = Arc::clone(&barrier);
+			move |_: &Event, _, _| {
+				while barrier.load(Relaxed) { /* Block consumer. */ }
+			}
+		};
+		let mut producer = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint)
+			.handle_events_with(processor)
+			.build();
+
+		assert_eq!(producer.free_slots(), 64);
+
+		producer.try_publish(|e| e.num = 1).unwrap();
+		producer.try_publish(|e| e.num = 2).unwrap();
+
+		// 2 published, consumer blocked.
+		let free = producer.free_slots();
+		assert!(free <= 62, "expected <= 62 free slots, got {free}");
+
+		barrier.store(false, Relaxed);
+		drop(producer);
+	}
 }

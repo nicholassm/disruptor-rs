@@ -72,17 +72,10 @@ where
 	C: Barrier
 {
 	#[inline]
-	fn capacity(&self) -> usize {
-		self.ring_buffer.size() as usize
-	}
-
-	#[inline]
-	fn fill_level(&self) -> usize {
+	fn free_slots(&self) -> usize {
 		let last_published = self.sequence - 1;
 		let last_consumed  = self.consumer_barrier.get_after(last_published);
-		let size           = self.ring_buffer.size();
-		let free           = self.ring_buffer.free_slots(last_published, last_consumed);
-		(size - free).max(0) as usize
+		self.ring_buffer.free_slots(last_published, last_consumed) as usize
 	}
 }
 

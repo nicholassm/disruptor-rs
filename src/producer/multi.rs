@@ -121,9 +121,20 @@ where
 {
 	#[inline]
 	fn free_slots(&self) -> usize {
-		let last_published = self.producer_barrier.current();
-		let last_consumed  = self.consumer_barrier.get_after(last_published);
-		self.ring_buffer.free_slots(last_published, last_consumed) as usize
+		// `producer_barrier.current()` is the highest sequence claimed by
+		// any producer (cursor advances on CAS, before the slot is marked
+		// as available to consumers via `publish`). For the purpose of
+		// "how many slots are unavailable to producers right now", a
+		// claimed-but-unpublished slot is correctly counted as in-use.
+		//
+		// The two atomic loads (cursor and consumer barrier) are
+		// independent and relaxed, so the pair can be slightly torn. We
+		// therefore clamp the result into `[0, size]` rather than rely on
+		// the snapshot being globally consistent.
+		let highest_claimed = self.producer_barrier.current();
+		let last_consumed   = self.consumer_barrier.get_after(highest_claimed);
+		let raw             = self.ring_buffer.free_slots(highest_claimed, last_consumed);
+		raw.clamp(0, self.ring_buffer.size()) as usize
 	}
 }
 

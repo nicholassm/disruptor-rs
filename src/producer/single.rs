@@ -73,9 +73,16 @@ where
 {
 	#[inline]
 	fn free_slots(&self) -> usize {
+		// `self.sequence` is the next sequence to publish, so the last
+		// published sequence is `self.sequence - 1`. This producer owns
+		// `self.sequence` exclusively, so the snapshot is consistent.
 		let last_published = self.sequence - 1;
 		let last_consumed  = self.consumer_barrier.get_after(last_published);
-		self.ring_buffer.free_slots(last_published, last_consumed) as usize
+		let raw            = self.ring_buffer.free_slots(last_published, last_consumed);
+		// Clamp to [0, size]. In correct operation `raw` is always within
+		// this range; the saturation defends against any future change
+		// that could produce a torn snapshot.
+		raw.clamp(0, self.ring_buffer.size()) as usize
 	}
 }
 

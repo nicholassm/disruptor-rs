@@ -1409,73 +1409,95 @@ mod tests {
 		}
 	}
 
+	/// RAII guard that releases a busy-spinning consumer when dropped.
+	///
+	/// The `free_slots` tests block the consumer inside its event handler
+	/// by spinning on an `AtomicBool`. If a test assertion panics, the
+	/// consumer must be released *before* the producer is dropped,
+	/// because the producer's `Drop` impl calls `consumer.join()` --
+	/// which would deadlock and hang the whole test binary if the
+	/// consumer were still spinning.
+	///
+	/// Variables in a block are dropped in reverse declaration order, so
+	/// declare the guard *after* the producer: on scope exit (panic or
+	/// otherwise) the guard drops first and releases the consumer, then
+	/// the producer drops and `join()` returns cleanly.
+	struct ConsumerReleaseGuard(Arc<AtomicBool>);
+
+	impl Drop for ConsumerReleaseGuard {
+		fn drop(&mut self) {
+			self.0.store(false, Relaxed);
+		}
+	}
+
 	#[test]
 	fn spsc_free_slots_initially_full() {
-		let barrier   = Arc::new(AtomicBool::new(true));
-		let processor = {
-			let barrier = Arc::clone(&barrier);
+		let block_consumer = Arc::new(AtomicBool::new(true));
+		let processor      = {
+			let block_consumer = Arc::clone(&block_consumer);
 			move |_: &Event, _, _| {
-				while barrier.load(Relaxed) { /* Block consumer. */ }
+				while block_consumer.load(Relaxed) { /* Block consumer. */ }
 			}
 		};
 		let producer = build_single_producer(8, factory(), BusySpinWithSpinLoopHint)
 			.handle_events_with(processor)
 			.build();
+		// Drop order is reverse of declaration: _release fires first and
+		// clears the spin flag, then producer is dropped and joins cleanly.
+		let _release = ConsumerReleaseGuard(Arc::clone(&block_consumer));
 
-		// Before any publishes, all slots should be free.
+		// Before any publishes, all 8 slots are free.
 		assert_eq!(producer.free_slots(), 8);
-
-		barrier.store(false, Relaxed);
-		drop(producer);
 	}
 
 	#[test]
 	fn spsc_free_slots_decreases_after_publish() {
-		let barrier   = Arc::new(AtomicBool::new(true));
-		let processor = {
-			let barrier = Arc::clone(&barrier);
+		let block_consumer = Arc::new(AtomicBool::new(true));
+		let processor      = {
+			let block_consumer = Arc::clone(&block_consumer);
 			move |_: &Event, _, _| {
-				while barrier.load(Relaxed) { /* Block consumer. */ }
+				while block_consumer.load(Relaxed) { /* Block consumer. */ }
 			}
 		};
 		let mut producer = build_single_producer(8, factory(), BusySpinWithSpinLoopHint)
 			.handle_events_with(processor)
 			.build();
+		let _release = ConsumerReleaseGuard(Arc::clone(&block_consumer));
 
 		producer.try_publish(|e| e.num = 1).unwrap();
 		producer.try_publish(|e| e.num = 2).unwrap();
 		producer.try_publish(|e| e.num = 3).unwrap();
 
-		// 3 published, consumer blocked => 5 free.
+		// 3 published, consumer blocked inside handler so its cursor is
+		// still -1 (cursor is stored *after* the handler returns), so
+		// `free_slots(2, -1) = -1 - (2 - 8) = 5`.
 		assert_eq!(producer.free_slots(), 5);
-
-		barrier.store(false, Relaxed);
-		drop(producer);
 	}
 
 	#[test]
 	fn mpsc_free_slots() {
-		let barrier   = Arc::new(AtomicBool::new(true));
-		let processor = {
-			let barrier = Arc::clone(&barrier);
+		let block_consumer = Arc::new(AtomicBool::new(true));
+		let processor      = {
+			let block_consumer = Arc::clone(&block_consumer);
 			move |_: &Event, _, _| {
-				while barrier.load(Relaxed) { /* Block consumer. */ }
+				while block_consumer.load(Relaxed) { /* Block consumer. */ }
 			}
 		};
 		let mut producer = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint)
 			.handle_events_with(processor)
 			.build();
+		let _release = ConsumerReleaseGuard(Arc::clone(&block_consumer));
 
+		// Before any publishes, all 64 slots are free.
 		assert_eq!(producer.free_slots(), 64);
 
 		producer.try_publish(|e| e.num = 1).unwrap();
 		producer.try_publish(|e| e.num = 2).unwrap();
 
-		// 2 published, consumer blocked.
-		let free = producer.free_slots();
-		assert!(free <= 62, "expected <= 62 free slots, got {free}");
-
-		barrier.store(false, Relaxed);
-		drop(producer);
+		// After two single-event publishes the multi-producer cursor is
+		// at 1 (claims 0 and 1 happened atomically). The consumer is
+		// blocked inside the handler for sequence 0, so the consumer
+		// cursor is still -1. `free_slots(1, -1) = -1 - (1 - 64) = 62`.
+		assert_eq!(producer.free_slots(), 62);
 	}
 }

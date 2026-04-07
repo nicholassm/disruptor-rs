@@ -70,6 +70,25 @@ impl<'a, E> Iterator for MutBatchIter<'a, E> {
 	}
 }
 
+/// Advisory access to ring buffer utilization.
+///
+/// Returns the number of currently free slots as a snapshot. The value is
+/// **advisory only**: it can be stale immediately after it is read, and in
+/// the multi-producer case the producer and consumer cursors are read with
+/// independent relaxed atomic loads, so the snapshot is not guaranteed to
+/// be perfectly consistent.
+///
+/// Use this for monitoring (e.g. warn when the buffer is more than 90%
+/// full) or as a cheap pre-check before attempting a batch publish. Callers
+/// must still handle the error returned by [`Producer::try_publish`] /
+/// [`Producer::try_batch_publish`] -- a non-zero `free_slots()` is not a
+/// guarantee that the next publication will succeed.
+pub trait ProducerInfo {
+	/// Returns the number of free slots in the ring buffer at the moment
+	/// of the call. See the trait-level docs for the consistency guarantees.
+	fn free_slots(&self) -> usize;
+}
+
 /// Producer used for publishing into the Disruptor.
 ///
 /// A `Producer` has two pairs of methods for publication:
@@ -95,28 +114,7 @@ impl<'a, E> Iterator for MutBatchIter<'a, E> {
 /// behaviour. (There is no guard in the library against breaching the limit due to performance considerations.)
 /// The limit can be avoided by e.g. dropping the Disruptor and creating a new if you have a use case where you can
 /// actually reach the limit in practice.
-/// Provides a method for querying ring buffer utilization.
-///
-/// Useful for monitoring and for pre-checking available space before batch
-/// publishing. The returned value is a snapshot that may be stale by the
-/// time it is used. In the multi-producer case, this provides a best-effort
-/// estimate with high probability of being accurate.
-pub trait ProducerInfo {
-	/// Returns the number of free slots in the ring buffer.
-	///
-	/// For a single producer, this is exact. For a multi-producer, this is
-	/// a best-effort estimate (another producer may claim slots concurrently).
-	///
-	/// Useful for checking whether a batch of size `n` will likely fit:
-	/// ```ignore
-	/// if producer.free_slots() >= batch.len() {
-	///     // High probability of success
-	/// }
-	/// ```
-	fn free_slots(&self) -> usize;
-}
-
-pub trait Producer<E>: ProducerInfo {
+pub trait Producer<E> {
 	/// Publish an Event into the Disruptor.
 	/// Returns a `Result` with the published sequence number or a [RingBufferFull] in case the
 	/// ring buffer is full.

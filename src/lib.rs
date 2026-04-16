@@ -1408,4 +1408,55 @@ mod tests {
 			assert_eq!(seq_seen_by_pid, seen_sequences[seq_seen_by_pid as usize]);
 		}
 	}
+
+	#[test]
+	fn spsc_free_slots() {
+		let barrier   = Arc::new(AtomicBool::new(true));
+		let processor = {
+			let barrier = Arc::clone(&barrier);
+			move |_: &Event, _, _| {
+				while barrier.load(Relaxed) { /* Wait. */ }
+			}
+		};
+		let mut producer = build_single_producer(8, factory(), BusySpinWithSpinLoopHint)
+			.handle_events_with(processor)
+			.build();
+
+		assert_eq!(producer.free_slots(), 8);
+
+		producer.try_publish(|e| e.num = 1).expect("Should publish");
+		producer.try_publish(|e| e.num = 2).expect("Should publish");
+		producer.try_publish(|e| e.num = 3).expect("Should publish");
+
+		// 3 published, consumer blocked, ring buffer is 8, so 5 free.
+		assert_eq!(producer.free_slots(), 5);
+
+		barrier.store(false, Relaxed);
+		drop(producer);
+	}
+
+	#[test]
+	fn mpsc_free_slots() {
+		let barrier   = Arc::new(AtomicBool::new(true));
+		let processor = {
+			let barrier = Arc::clone(&barrier);
+			move |_: &Event, _, _| {
+				while barrier.load(Relaxed) { /* Wait. */ }
+			}
+		};
+		let mut producer = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint)
+			.handle_events_with(processor)
+			.build();
+
+		assert_eq!(producer.free_slots(), 64);
+
+		producer.try_publish(|e| e.num = 1).expect("Should publish");
+		producer.try_publish(|e| e.num = 2).expect("Should publish");
+
+		// 2 published, consumer blocked, ring buffer is 64, so 62 free.
+		assert_eq!(producer.free_slots(), 62);
+
+		barrier.store(false, Relaxed);
+		drop(producer);
+	}
 }

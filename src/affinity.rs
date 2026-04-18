@@ -13,10 +13,11 @@ pub(crate) fn cpu_has_core_else_panic(id: usize) {
 }
 
 pub(crate) fn set_affinity_if_defined(core_affinity: Option<CoreId>, thread_name: &str) {
+    #[cfg(not(target_os = "macos"))]
     if let Some(core_id) = core_affinity {
         let got_pinned = core_affinity::set_for_current(core_id);
         if !got_pinned {
-            eprintln!(
+            panic!(
                 "Could not pin processor thread '{}' to {:?}.",
                 thread_name, core_id
             );

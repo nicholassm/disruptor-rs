@@ -137,7 +137,7 @@ pub trait ProcessorSettings<E, W>: Sized {
 	fn shared(&mut self) -> &mut Shared<E, W>;
 
 	/// Pin processor thread on the core with `id` for the next added event handler.
-	/// Outputs an error on stderr if the thread could not be pinned.
+	/// No-op on macos. Panics if the thread could not be pinned.
 	fn pin_at_core(mut self, id: usize) -> Self {
 		self.shared().pin_at_core(id);
 		self

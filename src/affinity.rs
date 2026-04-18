@@ -12,8 +12,13 @@ pub(crate) fn cpu_has_core_else_panic(id: usize) {
 	}
 }
 
+/// No-op on MacOS.
+#[cfg(target_os = "macos")]
+pub(crate) fn set_affinity_if_defined(_core_affinity: Option<CoreId>, _thread_name: &str) {}
+
+/// Sets the core affinity.
+#[cfg(not(target_os = "macos"))]
 pub(crate) fn set_affinity_if_defined(core_affinity: Option<CoreId>, thread_name: &str) {
-	#[cfg(not(target_os = "macos"))]
 	if let Some(core_id) = core_affinity {
 		let got_pinned = core_affinity::set_for_current(core_id);
 		if !got_pinned {

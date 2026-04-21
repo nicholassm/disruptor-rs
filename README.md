@@ -29,7 +29,7 @@ Use it when you want to trade CPU resources for lower latency and higher through
 
 Add the following to your `Cargo.toml` file:
 
-    disruptor = "4.0.0"
+    disruptor = "4.1.0"
 
 To read details of how to use the library, check out the documentation on [docs.rs/disruptor](https://docs.rs/disruptor).
 

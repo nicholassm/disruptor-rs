@@ -168,13 +168,22 @@ where
 	W: WaitStrategy,
 {
 	let mut available = barrier.get_after(sequence);
-	while available < sequence {
-		// If publisher(s) are done publishing events we're done when we've seen the last event.
-		if shutdown_at_sequence.load(Ordering::Relaxed) == sequence {
-			return None;
+	if available < sequence {
+		wait_strategy.wait_for(sequence, || {
+			if shutdown_at_sequence.load(Ordering::Relaxed) == sequence {
+				return true;
+			}
+			available = barrier.get_after(sequence);
+			available >= sequence
+		});
+
+		if available < sequence {
+			// Check one last time in case an event was published right before shutdown.
+			available = barrier.get_after(sequence);
+			if available < sequence {
+				return None;
+			}
 		}
-		wait_strategy.wait_for(sequence);
-		available = barrier.get_after(sequence);
 	}
 	fence(Ordering::Acquire);
 	Some(available)

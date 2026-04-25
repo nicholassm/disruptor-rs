@@ -83,6 +83,20 @@ where
 		})
 	}
 
+	/// Get multiple EventPollers at the same time.
+	pub fn new_event_pollers(mut self, count: usize) -> (Vec<EventPoller<E, B>>, SPBuilder<MC, E, W, B>) {
+		assert!(count > 0, "count must be > 0");
+		let event_pollers = (0..count).map(|_| self.build_event_poller()).collect();
+
+		(event_pollers,
+		SPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		})
+	}
+
 	/// Join a branch back into the main flow and get the `EventPoller` for the branch.
 	pub fn join<B2>(mut self, branch: Branch<E, B2>) -> (EventPoller<E, B2>, SPBuilder<SC, E, W, B>) {
 		self.add_cursor_from_branch(&branch);
@@ -152,6 +166,19 @@ where
 		let event_poller = self.build_event_poller();
 
 		(event_poller,
+		SPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		})
+	}
+
+	/// Get multiple EventPollers at the same time.
+	pub fn new_event_pollers(mut self, count: usize) -> (Vec<EventPoller<E, B>>, SPBuilder<MC, E, W, B>) {
+		let event_pollers = (0..count).map(|_| self.build_event_poller()).collect();
+
+		(event_pollers,
 		SPBuilder {
 			state:             PhantomData,
 			shared:            self.shared,
@@ -231,6 +258,19 @@ where
 		let event_poller = self.build_event_poller();
 
 		(event_poller,
+		SPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		})
+	}
+
+	/// Get multiple EventPollers at the same time.
+	pub fn new_event_pollers(mut self, count: usize) -> (Vec<EventPoller<E, B>>, SPBuilder<MC, E, W, B>) {
+		let event_pollers = (0..count).map(|_| self.build_event_poller()).collect();
+
+		(event_pollers,
 		SPBuilder {
 			state:             PhantomData,
 			shared:            self.shared,

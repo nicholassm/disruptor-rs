@@ -49,6 +49,7 @@ impl Barrier for SingleConsumerBarrier {
 
 impl MultiConsumerBarrier {
 	pub(crate) fn new(cursors: Vec<Arc<Cursor>>) -> Self {
+		assert!(!cursors.is_empty(), "MultiConsumerBarrier must have at least one cursor");
 		Self {
 			cursors
 		}

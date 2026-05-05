@@ -244,7 +244,7 @@ pub struct MultiProducerBarrier {
 
 impl MultiProducerBarrier {
 	pub(crate) fn new(size: usize) -> Self {
-		assert!(size >= 64, "Multi Producer Disruptor must have a size of minimum 64 slots.");
+		assert!(size >= 64, "MultiProducerBarrier must have a size of minimum 64 slots");
 
 		let cursor      = Cursor::new();
 		let i64_needed  = size/64;

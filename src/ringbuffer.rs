@@ -16,7 +16,7 @@ impl <E> RingBuffer<E> {
 	where
 		F: FnMut() -> E
 	{
-		if !size.is_power_of_two() { panic!("Size must be power of 2.") }
+		assert!(size.is_power_of_two(), "Size must be a power of 2");
 
 		let slots: Box<[UnsafeCell<E>]> = (0..size)
 			.map(|_i| UnsafeCell::new(event_factory()) )

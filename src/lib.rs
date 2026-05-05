@@ -333,8 +333,8 @@ mod tests {
 	}
 
 	#[test]
-	#[should_panic(expected = "Size must be power of 2.")]
-	fn size_not_a_factor_of_2() {
+	#[should_panic(expected = "Size must be a power of 2")]
+	fn size_is_power_of_2() {
 		build_single_producer(3, || { 0 }, BusySpin);
 	}
 
@@ -367,6 +367,12 @@ mod tests {
 		drop(producer);
 		let result: Vec<_> = r.iter().collect();
 		assert_eq!(result, [0, 1, 2, 3, 4]);
+	}
+
+	#[test]
+	#[should_panic(expected = "MultiProducerBarrier must have a size of minimum 64 slots")]
+	fn mpsc_size_is_greater_than_64() {
+		build_multi_producer(32, || { 0 }, BusySpin);
 	}
 
 	#[test]
@@ -985,6 +991,15 @@ mod tests {
 		assert_eq!(ep1.poll().err(), Some(Polling::Shutdown));
 		assert_eq!(ep2.poll().err(), Some(Polling::Shutdown));
 		assert_eq!(ep3.poll().err(), Some(Polling::Shutdown));
+	}
+
+	#[test]
+	#[should_panic(expected = "MultiConsumerBarrier must have at least one cursor")]
+	fn mpmc_without_consumers() {
+		let builder       = build_multi_producer(64, factory(), BusySpin).with_multi_consumer();
+		
+		// Must panic since no consumers have been added to the builder
+		builder.build();
 	}
 
 	#[test]

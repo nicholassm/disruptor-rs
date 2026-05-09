@@ -70,6 +70,16 @@ where
 		}
 	}
 
+	/// Force builder transition to multi consumer state. This is useful if you want to add multiple consumers in a loop.
+	pub fn with_multi_consumer(self) -> SPBuilder<MC, E, W, B> {
+		SPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		}
+	}
+
 	/// Get an EventPoller.
 	pub fn new_event_poller(mut self) -> (EventPoller<E, B>, SPBuilder<SC, E, W, B>) {
 		let event_poller = self.build_event_poller();

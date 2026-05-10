@@ -308,6 +308,7 @@ fn main() {
 - [x] Single Producer Multi Consumer (SPMC) with consumer interdependencies.
 - [x] Multi Producer Single Consumer (MPSC).
 - [x] Multi Producer Multi Consumer (MPMC) with consumer interdependencies.
+- [x] Single Consumer optimized barrier.
 - [x] Busy-spin wait strategies.
 - [x] Batch publication of events.
 - [x] Batch consumption of events.
@@ -385,6 +386,57 @@ let processor1 = |e: &Event, sequence: Sequence, _end_of_batch: bool| {
 ```
 
 This scheme ensures each event is processed once.
+
+## Dynamic Number of Consumers and Producers
+
+Sometimes, you don't know at compile time how many producers or consumers you need at runtime.
+It could be your data processing pipeline that has different number of sources and sinks - based
+on configuration - or your trading engine that has a variable number of input and output feeds.
+
+To accommodate that, you can use this pattern:
+
+```rust
+fn build_disruptor<E, F, W>(
+    size:           usize,
+    event_factory:  F,
+    wait_strategy:  W,
+    producer_count: usize,
+    consumer_count: usize,
+) -> Result<(
+    Vec<MultiProducer<E, MultiConsumerBarrier>>,
+    Vec<EventPoller<E, MultiProducerBarrier>>,
+)>
+where
+    F: FnMut() -> E,
+    E: 'static + Send + Sync,
+    W: 'static + WaitStrategy,
+{
+    if producer_count == 0 || consumer_count == 0 {
+        bail!("Must have at least one consumer and producer.");
+    }
+
+    let mut builder = disruptor::build_multi_producer(size, event_factory, wait_strategy)
+        .with_multi_consumer();
+
+    // Create consumers (EventPollers):
+    let mut consumers = Vec::new();
+    for _ in 0..consumer_count {
+        let (poller, next_builder) = builder.new_event_poller();
+        consumers.push(poller);
+        builder = next_builder;
+    }
+
+    // Create producers:
+    let producer = builder.build();
+    let mut producers = Vec::new();
+    for _ in 1..producer_count {
+        producers.push(producer.clone());
+    }
+    producers.push(producer);
+
+    Ok((producers, consumers))
+}
+```
 
 # Design Choices
 

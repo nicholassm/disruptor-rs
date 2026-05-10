@@ -70,7 +70,37 @@ where
 		}
 	}
 
-	/// Force builder transition to multi consumer state. This is useful if you want to add multiple consumers in a loop.
+	/// Transition the builder directly to the multi consumer state (and skip the single consumer optimization).
+	///
+	/// This is useful if you want to add multiple consumers in e.g. a loop or you only know the number of
+	/// consumers at runtime.
+	///
+	/// # Examples
+	///
+	/// ```
+	///# #[cfg(miri)] fn main() {}
+	///# #[cfg(not(miri))]
+	///# fn main() {
+	///# use disruptor::*;
+	///#
+	///# struct Event {
+	///#     price: f64
+	///# }
+	///# let factory = || { Event { price: 0.0 }};
+	/// let mut builder = build_multi_producer(64, factory, BusySpin)
+	///     .with_multi_consumer();
+	///
+	/// let consumer_count = 8; // Could be read from a config file.
+	///
+	/// // Create a dynamic number of `EventPoller`'s:
+	/// let mut pollers = Vec::new();
+	/// for _ in 0..consumer_count {
+	///     let (poller, next_builder) = builder.new_event_poller();
+	///     pollers.push(poller);
+	///     builder = next_builder;
+	/// }
+	///# }
+	/// ```
 	pub fn with_multi_consumer(self) -> MPBuilder<MC, E, W, B> {
 		MPBuilder {
 			state:             PhantomData,

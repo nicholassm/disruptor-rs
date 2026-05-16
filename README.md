@@ -29,7 +29,7 @@ Use it when you want to trade CPU resources for lower latency and higher through
 
 Add the following to your `Cargo.toml` file:
 
-    disruptor = "4.2.0"
+    disruptor = "4.3.0"
 
 To read details of how to use the library, check out the documentation on [docs.rs/disruptor](https://docs.rs/disruptor).
 
@@ -310,6 +310,7 @@ fn main() {
 - [x] Multi Producer Multi Consumer (MPMC) with consumer interdependencies.
 - [x] Single Consumer optimized barrier.
 - [x] Busy-spin wait strategies.
+- [x] Sleep wait strategy for development/non-latency sensitive applications.
 - [x] Batch publication of events.
 - [x] Batch consumption of events.
 - [x] Event Poller API.

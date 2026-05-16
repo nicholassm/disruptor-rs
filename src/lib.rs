@@ -389,7 +389,7 @@ use super::*;
 				s.send(e.num).expect("Should be able to send.");
 			}
 		};
-		let mut producer1 = build_multi_producer(64, factory(), Sleep{duration: Duration::from_millis(1)})
+		let mut producer1 = build_multi_producer(64, factory(), Sleep::new(Duration::from_millis(1)))
 			.handle_events_with(processor)
 			.build();
 

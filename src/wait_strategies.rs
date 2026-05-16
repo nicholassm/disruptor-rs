@@ -40,16 +40,26 @@ impl WaitStrategy for BusySpinWithSpinLoopHint {
 	}
 }
 
-/// Sleeps for an arbitrary amount of time. Useful if you are developing, dont want to occupy a core 100% and listen
-/// to the machine screaming.
+/// Sleeps for a specified amount of time.
+///
+/// Useful during development, or if you also want to use the Disruptor
+/// for non latency critical parts of your application.
 #[derive(Copy, Clone)]
 pub struct Sleep {
-	/// The amount of time to sleep
-	pub duration: Duration
+	/// The amount of time to sleep.
+	duration: Duration
+}
+
+impl Sleep {
+	/// Create a `Sleep` wait strategy that sleeps the specified
+	/// amount if no new events are ready for consumption.
+	pub fn new(duration: Duration) -> Self {
+		Self { duration }
+	}
 }
 
 impl WaitStrategy for Sleep {
 	fn wait_for(&self, _sequence: Sequence) {
-		    thread::sleep(self.duration);
+		thread::sleep(self.duration);
 	}
 }

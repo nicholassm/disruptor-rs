@@ -40,13 +40,16 @@ impl WaitStrategy for BusySpinWithSpinLoopHint {
 	}
 }
 
-/// Sleeps for a millisecond. Useful if you are developing, dont want to occupy a core 100% and listen
+/// Sleeps for an arbitrary amount of time. Useful if you are developing, dont want to occupy a core 100% and listen
 /// to the machine screaming.
 #[derive(Copy, Clone)]
-pub struct SlowSleepDebug;
+pub struct Sleep {
+	/// The amount of time to sleep
+	pub duration: Duration
+}
 
-impl WaitStrategy for SlowSleepDebug {
+impl WaitStrategy for Sleep {
 	fn wait_for(&self, _sequence: Sequence) {
-		    thread::sleep(Duration::from_millis(1));
+		    thread::sleep(self.duration);
 	}
 }

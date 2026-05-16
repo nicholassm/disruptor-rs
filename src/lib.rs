@@ -320,8 +320,11 @@ mod tests {
 	use std::sync::atomic::Ordering::Relaxed;
 	use std::sync::{mpsc, Arc};
 	use std::thread;
+use std::time::Duration;
 	use producer::MissingFreeSlots;
-	use super::*;
+	use crate::wait_strategies::Sleep;
+
+use super::*;
 
 	#[derive(Debug)]
 	struct Event {
@@ -386,7 +389,7 @@ mod tests {
 				s.send(e.num).expect("Should be able to send.");
 			}
 		};
-		let mut producer1 = build_multi_producer(64, factory(), BusySpinWithSpinLoopHint)
+		let mut producer1 = build_multi_producer(64, factory(), Sleep{duration: Duration::from_millis(1)})
 			.handle_events_with(processor)
 			.build();
 

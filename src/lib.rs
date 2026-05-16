@@ -306,7 +306,7 @@ mod producer;
 
 pub use crate::builder::{build_single_producer, build_multi_producer, ProcessorSettings};
 pub use crate::producer::{Producer, RingBufferFull, MissingFreeSlots};
-pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint};
+pub use crate::wait_strategies::{BusySpin, BusySpinWithSpinLoopHint, Sleep};
 pub use crate::producer::{single::{SingleProducer, SingleProducerBarrier}, multi::{MultiProducer,  MultiProducerBarrier}};
 pub use crate::consumer::{SingleConsumerBarrier, MultiConsumerBarrier};
 pub use crate::consumer::event_poller::{EventPoller, Polling, EventGuard, Branch};

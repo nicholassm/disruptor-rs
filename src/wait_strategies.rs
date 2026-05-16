@@ -5,6 +5,8 @@
 //! To "waste" less CPU time and power, use one of the other strategies which have higher latency.
 
 use std::hint;
+use std::thread;
+use std::time::Duration;
 
 use crate::Sequence;
 
@@ -35,5 +37,16 @@ pub struct BusySpinWithSpinLoopHint;
 impl WaitStrategy for BusySpinWithSpinLoopHint {
 	fn wait_for(&self, _sequence: Sequence) {
 		hint::spin_loop();
+	}
+}
+
+/// Sleeps for a millisecond. Useful if you are developing, dont want to occupy a core 100% and listen
+/// to the machine screaming.
+#[derive(Copy, Clone)]
+pub struct SlowSleepDebug;
+
+impl WaitStrategy for SlowSleepDebug {
+	fn wait_for(&self, _sequence: Sequence) {
+		    thread::sleep(Duration::from_millis(1));
 	}
 }

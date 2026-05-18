@@ -119,6 +119,17 @@ impl<E, C> MultiProducer<E, C>
 where
 	C: Barrier
 {
+	/// Returns the number of free slots in the ring buffer.
+	///
+	/// Across multiple producers this is a best-effort snapshot: another
+	/// producer may claim slots between reading the value and using it.
+	#[inline]
+	pub fn free_slots(&self) -> usize {
+		let current            = self.producer_barrier.current();
+		let rear_sequence_read = self.consumer_barrier.get_after(current);
+		self.ring_buffer.free_slots(current, rear_sequence_read) as usize
+	}
+
 	pub(crate) fn new(
 		shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
 		ring_buffer:          Arc<RingBuffer<E>>,

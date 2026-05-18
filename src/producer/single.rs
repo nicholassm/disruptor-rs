@@ -71,6 +71,14 @@ impl<E, C> SingleProducer<E, C>
 where
 	C: Barrier
 {
+	/// Returns the number of free slots in the ring buffer.
+	#[inline]
+	pub fn free_slots(&self) -> usize {
+		let last_published     = self.sequence - 1;
+		let rear_sequence_read = self.consumer_barrier.get_after(last_published);
+		self.ring_buffer.free_slots(last_published, rear_sequence_read) as usize
+	}
+
 	pub(crate) fn new(
 		shutdown_at_sequence: Arc<CachePadded<AtomicI64>>,
 		ring_buffer:          Arc<RingBuffer<E>>,

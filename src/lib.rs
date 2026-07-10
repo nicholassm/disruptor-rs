@@ -316,13 +316,13 @@ mod tests {
 	use std::rc::Rc;
 	use std::cell::RefCell;
 	use std::collections::HashSet;
-	use std::sync::atomic::AtomicBool;
+	use std::sync::atomic::{AtomicBool, AtomicUsize};
 	use std::sync::atomic::Ordering::Relaxed;
 	use std::sync::{mpsc, Arc};
 	use std::thread;
 use std::time::Duration;
 	use producer::MissingFreeSlots;
-	use crate::wait_strategies::Sleep;
+	use crate::wait_strategies::{Sleep, WaitStrategy};
 
 use super::*;
 
@@ -331,8 +331,79 @@ use super::*;
 		num: i64,
 	}
 
+	macro_rules! counting_wait_strategy {
+		($name:ident) => {
+			#[derive(Copy, Clone)]
+			struct $name(&'static AtomicUsize);
+
+			impl WaitStrategy for $name {
+				fn wait_for(&self, _sequence: Sequence) {
+					self.0.fetch_add(1, Relaxed);
+					thread::yield_now();
+				}
+			}
+		};
+	}
+
+	counting_wait_strategy!(CountingWaitA);
+	counting_wait_strategy!(CountingWaitB);
+	counting_wait_strategy!(CountingWaitC);
+	counting_wait_strategy!(CountingWaitD);
+
+	fn wait_for_strategies(counters: &[&AtomicUsize]) {
+		for _ in 0..1_000_000 {
+			if counters.iter().all(|counter| counter.load(Relaxed) > 0) {
+				return;
+			}
+			thread::yield_now();
+		}
+		panic!("processor wait strategies were not invoked");
+	}
+
+	fn wait_counter() -> &'static AtomicUsize {
+		Box::leak(Box::new(AtomicUsize::new(0)))
+	}
+
 	fn factory() -> impl Fn() -> Event {
 		|| Event { num: -1 }
+	}
+
+	#[test]
+	fn single_producer_supports_heterogeneous_processor_wait_strategies() {
+		let a = wait_counter();
+		let b = wait_counter();
+		let c = wait_counter();
+		let d = wait_counter();
+
+		let producer = build_single_producer(8, factory(), BusySpin)
+			.handle_events_with_wait_strategy(|_: &Event, _, _| {}, CountingWaitA(a))
+			.handle_events_and_state_with_wait_strategy(|_: &mut (), _: &Event, _, _| {}, || {}, CountingWaitB(b))
+			.and_then()
+			.handle_events_with_wait_strategy(|_: &Event, _, _| {}, CountingWaitC(c))
+			.handle_events_and_state_with_wait_strategy(|_: &mut (), _: &Event, _, _| {}, || {}, CountingWaitD(d))
+			.build();
+
+		wait_for_strategies(&[a, b, c, d]);
+		drop(producer);
+	}
+
+	#[test]
+	fn multi_producer_supports_heterogeneous_processor_wait_strategies() {
+		let a = wait_counter();
+		let b = wait_counter();
+		let c = wait_counter();
+		let d = wait_counter();
+
+		let producer = build_multi_producer(64, factory(), BusySpin)
+			.handle_events_and_state_with_wait_strategy(|_: &mut (), _: &Event, _, _| {}, || {}, CountingWaitA(a))
+			.handle_events_with_wait_strategy(|_: &Event, _, _| {}, CountingWaitB(b))
+			.and_then()
+			.handle_events_and_state_with_wait_strategy(|_: &mut (), _: &Event, _, _| {}, || {}, CountingWaitC(c))
+			.handle_events_with_wait_strategy(|_: &Event, _, _| {}, CountingWaitD(d))
+			.build();
+
+		wait_for_strategies(&[a, b, c, d]);
+		drop(producer);
 	}
 
 	#[test]
@@ -660,7 +731,7 @@ use super::*;
 
 			s.spawn(move || {
 				for i in (num_items/2)..num_items {
-					producer2.publish(|e| e.num = i);
+					producer2.publish(|e| e.num = i as i64);
 				}
 			});
 		});

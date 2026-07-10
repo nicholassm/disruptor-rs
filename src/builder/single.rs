@@ -152,6 +152,23 @@ where
 		}
 	}
 
+	/// Add an event handler with a processor-specific wait strategy.
+	///
+	/// Unlike [`handle_events_with`](Self::handle_events_with), this does not use the builder's default strategy.
+	pub fn handle_events_with_wait_strategy<EH, PW>(mut self, event_handler: EH, wait_strategy: PW) -> SPBuilder<SC, E, W, B>
+	where
+		EH: 'static + Send + FnMut(&E, Sequence, bool),
+		PW: 'static + WaitStrategy,
+	{
+		self.add_event_handler_with_wait_strategy(event_handler, wait_strategy);
+		SPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		}
+	}
+
 	/// Add an event handler with state.
 	pub fn handle_events_and_state_with<EH, S, IS>(mut self, event_handler: EH, initialize_state: IS) -> SPBuilder<SC, E, W, B>
 	where
@@ -159,6 +176,24 @@ where
 		IS: 'static + Send + FnOnce() -> S,
 	{
 		self.add_event_handler_with_state(event_handler, initialize_state);
+		SPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		}
+	}
+
+	/// Add an event handler with state and a processor-specific wait strategy.
+	///
+	/// Unlike [`handle_events_and_state_with`](Self::handle_events_and_state_with), this does not use the builder's default strategy.
+	pub fn handle_events_and_state_with_wait_strategy<EH, S, IS, PW>(mut self, event_handler: EH, initialize_state: IS, wait_strategy: PW) -> SPBuilder<SC, E, W, B>
+	where
+		EH: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
+		IS: 'static + Send + FnOnce() -> S,
+		PW: 'static + WaitStrategy,
+	{
+		self.add_event_handler_and_state_with_wait_strategy(event_handler, initialize_state, wait_strategy);
 		SPBuilder {
 			state:             PhantomData,
 			shared:            self.shared,
@@ -244,6 +279,23 @@ where
 		}
 	}
 
+	/// Add an event handler with a processor-specific wait strategy.
+	///
+	/// Unlike [`handle_events_with`](Self::handle_events_with), this does not use the builder's default strategy.
+	pub fn handle_events_with_wait_strategy<EH, PW>(mut self, event_handler: EH, wait_strategy: PW) -> SPBuilder<MC, E, W, B>
+	where
+		EH: 'static + Send + FnMut(&E, Sequence, bool),
+		PW: 'static + WaitStrategy,
+	{
+		self.add_event_handler_with_wait_strategy(event_handler, wait_strategy);
+		SPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		}
+	}
+
 	/// Add an event handler with state.
 	pub fn handle_events_and_state_with<EH, S, IS>(mut self, event_handler: EH, initalize_state: IS) -> SPBuilder<MC, E, W, B>
 	where
@@ -251,6 +303,24 @@ where
 		IS: 'static + Send + FnOnce() -> S,
 	{
 		self.add_event_handler_with_state(event_handler, initalize_state);
+		SPBuilder {
+			state:             PhantomData,
+			shared:            self.shared,
+			producer_barrier:  self.producer_barrier,
+			dependent_barrier: self.dependent_barrier,
+		}
+	}
+
+	/// Add an event handler with state and a processor-specific wait strategy.
+	///
+	/// Unlike [`handle_events_and_state_with`](Self::handle_events_and_state_with), this does not use the builder's default strategy.
+	pub fn handle_events_and_state_with_wait_strategy<EH, S, IS, PW>(mut self, event_handler: EH, initialize_state: IS, wait_strategy: PW) -> SPBuilder<MC, E, W, B>
+	where
+		EH: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
+		IS: 'static + Send + FnOnce() -> S,
+		PW: 'static + WaitStrategy,
+	{
+		self.add_event_handler_and_state_with_wait_strategy(event_handler, initialize_state, wait_strategy);
 		SPBuilder {
 			state:             PhantomData,
 			shared:            self.shared,
@@ -303,6 +373,18 @@ where
 		self
 	}
 
+	/// Add an event handler with a processor-specific wait strategy.
+	///
+	/// Unlike [`handle_events_with`](Self::handle_events_with), this does not use the builder's default strategy.
+	pub fn handle_events_with_wait_strategy<EH, PW>(mut self, event_handler: EH, wait_strategy: PW) -> SPBuilder<MC, E, W, B>
+	where
+		EH: 'static + Send + FnMut(&E, Sequence, bool),
+		PW: 'static + WaitStrategy,
+	{
+		self.add_event_handler_with_wait_strategy(event_handler, wait_strategy);
+		self
+	}
+
 	/// Add an event handler with state.
 	pub fn handle_events_and_state_with<EH, S, IS>(mut self, event_handler: EH, initialize_state: IS) -> SPBuilder<MC, E, W, B>
 	where
@@ -310,6 +392,19 @@ where
 		IS: 'static + Send + FnOnce() -> S,
 	{
 		self.add_event_handler_with_state(event_handler, initialize_state);
+		self
+	}
+
+	/// Add an event handler with state and a processor-specific wait strategy.
+	///
+	/// Unlike [`handle_events_and_state_with`](Self::handle_events_and_state_with), this does not use the builder's default strategy.
+	pub fn handle_events_and_state_with_wait_strategy<EH, S, IS, PW>(mut self, event_handler: EH, initialize_state: IS, wait_strategy: PW) -> SPBuilder<MC, E, W, B>
+	where
+		EH: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
+		IS: 'static + Send + FnOnce() -> S,
+		PW: 'static + WaitStrategy,
+	{
+		self.add_event_handler_and_state_with_wait_strategy(event_handler, initialize_state, wait_strategy);
 		self
 	}
 

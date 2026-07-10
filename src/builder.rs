@@ -160,8 +160,17 @@ where
 	where
 		EH: 'static + Send + FnMut(&E, Sequence, bool)
 	{
+		let wait_strategy = self.shared().wait_strategy;
+		self.add_event_handler_with_wait_strategy(event_handler, wait_strategy);
+	}
+
+	fn add_event_handler_with_wait_strategy<EH, PW>(&mut self, event_handler: EH, wait_strategy: PW)
+	where
+		EH: 'static + Send + FnMut(&E, Sequence, bool),
+		PW: 'static + WaitStrategy,
+	{
 		let barrier            = self.dependent_barrier();
-		let (cursor, consumer) = start_processor(event_handler, self.shared(), barrier);
+		let (cursor, consumer) = start_processor(event_handler, self.shared(), barrier, wait_strategy);
 		self.shared().add_consumer_and_cursor(consumer, cursor);
 	}
 
@@ -195,8 +204,18 @@ where
 		EH: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
 		IS: 'static + Send + FnOnce() -> S,
 	{
+		let wait_strategy = self.shared().wait_strategy;
+		self.add_event_handler_and_state_with_wait_strategy(event_handler, initialize_state, wait_strategy);
+	}
+
+	fn add_event_handler_and_state_with_wait_strategy<EH, S, IS, PW>(&mut self, event_handler: EH, initialize_state: IS, wait_strategy: PW)
+	where
+		EH: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
+		IS: 'static + Send + FnOnce() -> S,
+		PW: 'static + WaitStrategy,
+	{
 		let barrier            = self.dependent_barrier();
-		let (cursor, consumer) = start_processor_with_state(event_handler, self.shared(), barrier, initialize_state);
+		let (cursor, consumer) = start_processor_with_state(event_handler, self.shared(), barrier, initialize_state, wait_strategy);
 		self.shared().add_consumer_and_cursor(consumer, cursor);
 	}
 

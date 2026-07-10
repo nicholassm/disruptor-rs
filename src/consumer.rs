@@ -67,19 +67,19 @@ impl Barrier for MultiConsumerBarrier {
 	}
 }
 
-pub(crate) fn start_processor<E, EP, W, B> (
+pub(crate) fn start_processor<E, EP, W, B, PW> (
 	mut event_handler: EP,
 	builder:           &mut Shared<E, W>,
-	barrier:           Arc<B>)
+	barrier:           Arc<B>,
+	wait_strategy:     PW)
 -> (Arc<Cursor>, Consumer)
 where
 	E:  'static + Send + Sync,
 	EP: 'static + Send + FnMut(&E, Sequence, bool),
-	W:  'static + WaitStrategy,
+	PW: 'static + WaitStrategy,
 	B:  'static + Barrier + Send + Sync,
 {
 	let consumer_cursor      = Arc::new(Cursor::new());
-	let wait_strategy        = builder.wait_strategy;
 	let ring_buffer          = Arc::clone(&builder.ring_buffer);
 	let shutdown_at_sequence = Arc::clone(&builder.shutdown_at_sequence);
 	let thread_name          = builder.thread_context.name();
@@ -110,21 +110,21 @@ where
 	(consumer_cursor, consumer)
 }
 
-pub(crate) fn start_processor_with_state<E, EP, W, B, S, IS> (
+pub(crate) fn start_processor_with_state<E, EP, W, B, S, IS, PW> (
 	mut event_handler: EP,
 	builder:           &mut Shared<E, W>,
 	barrier:           Arc<B>,
-	initialize_state:  IS)
+	initialize_state:  IS,
+	wait_strategy:     PW)
 -> (Arc<Cursor>, Consumer)
 where
 	E:  'static + Send + Sync,
 	IS: 'static + Send + FnOnce() -> S,
 	EP: 'static + Send + FnMut(&mut S, &E, Sequence, bool),
-	W:  'static + WaitStrategy,
+	PW: 'static + WaitStrategy,
 	B:  'static + Barrier + Send + Sync,
 {
 	let consumer_cursor      = Arc::new(Cursor::new());
-	let wait_strategy        = builder.wait_strategy;
 	let ring_buffer          = Arc::clone(&builder.ring_buffer);
 	let shutdown_at_sequence = Arc::clone(&builder.shutdown_at_sequence);
 	let thread_name          = builder.thread_context.name();
